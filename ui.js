@@ -8,6 +8,7 @@
 let selectedMode = 'solo';
 let selectedSkin = [0, 1]; // [P1, P2] indices into PLAYER_SKINS
 let selectedSpeedrun = false;
+let selectedMap = 'forest';
 
 // localStorage key for the speedrun personal best (seconds it took to fell the Titan).
 const SPEEDRUN_BEST_KEY = 'pixelSurvivors_speedrun_best';
@@ -63,10 +64,17 @@ function rollUpgrades(p) {
 
   const out = readySupers.slice(0, 3);
 
+  // Track how many unlock cards are already in the roll — never let more than 2
+  // unlocks coexist, even when the player is missing several weapons. Picking
+  // 3-of-3 unlocks felt overwhelming and crowded out actual upgrades.
+  const MAX_UNLOCKS_PER_ROLL = 2;
+  let unlocksInOut = 0;
+
   // Always offer at least one unlock when slots are open.
   if (out.length < 3 && unlocks.length > 0) {
     const i = irand(0, unlocks.length - 1);
     out.push(unlocks.splice(i, 1)[0]);
+    unlocksInOut++;
   }
 
   // Pool the rest. Unlocks weighted 3× so they keep appearing.
@@ -76,7 +84,9 @@ function rollUpgrades(p) {
     const i = irand(0, pool.length - 1);
     const pick = pool.splice(i, 1)[0];
     if (out.some(o => o.id === pick.id)) continue;
+    if (pick.isUnlock && unlocksInOut >= MAX_UNLOCKS_PER_ROLL) continue;
     out.push(pick);
+    if (pick.isUnlock) unlocksInOut++;
   }
 
   // Roll EPIC on stat upgrades only — supers/unlocks can't be doubled.
@@ -114,6 +124,9 @@ function showLevelUp() {
 
 function renderLevelUpPanel(p, options) {
   const panel = document.getElementById('panel');
+  // Theme the frame to match the leveling player — blue for P1, red for P2.
+  panel.classList.toggle('team-blue', p.team === 'blue');
+  panel.classList.toggle('team-red', p.team === 'red');
 
   const slotsHtml = (() => {
     const cells = [];
@@ -218,7 +231,7 @@ function renderLevelUpPanel(p, options) {
       <div class="loadout-title">${isCoop ? `${p.name} ` : ''}LOADOUT &nbsp; ${p.slots.length}/${MAX_SLOTS}${tier2Bit}</div>
       <div class="slots-row">${slotsHtml}</div>
     </div>
-    <div class="credit-tag">by stephen</div>
+    <div class="credit-tag">by stephen<a href="https://github.com/sztephen" target="_blank" rel="noopener noreferrer">github.com/sztephen</a></div>
   `;
   document.getElementById('overlay').style.display = 'flex';
   panel.querySelectorAll('canvas[data-icon]').forEach(c => drawIcon(c, c.dataset.icon));
@@ -408,6 +421,7 @@ function showVictory() {
       </div>`;
   }
   const panel = document.getElementById('panel');
+  panel.classList.remove('team-blue', 'team-red');
   panel.innerHTML = `
     <h1 style="color:#ffcc44">VICTORY!</h1>
     <p style="color:#ffee88; font-size:13px; letter-spacing:2px;">
@@ -429,6 +443,7 @@ function gameOver() {
   world.gameOver = true;
   SFX.death();
   const panel = document.getElementById('panel');
+  panel.classList.remove('team-blue', 'team-red');
   panel.innerHTML = `
     <h1>YOU DIED</h1>
     <p>Survived: <b style="color:#ff66cc">${formatTime(world.time)}</b></p>
@@ -446,33 +461,51 @@ function showStartScreen() {
   const panel = document.getElementById('panel');
   const best = getSpeedrunBest();
   const bestStr = best == null ? '—' : formatTime(best);
+  panel.classList.remove('team-blue', 'team-red');
   panel.classList.add('start-panel');
   panel.innerHTML = `
     <div class="menu-title">PIXEL SURVIVORS</div>
-    <div class="menu-subtitle">SURVIVE 15 MINUTES &nbsp;→&nbsp; <b>DEFEAT THE TITAN</b></div>
+    <div class="menu-subtitle">SURVIVE 12 MINUTES &nbsp;→&nbsp; <b>DEFEAT THE TITAN</b></div>
 
-    <div class="menu-section">
-      <div class="menu-section-title">MODE</div>
-      <div id="modeButtons" class="mode-row">
-        <button class="mode-btn ${selectedMode === 'solo' ? 'selected' : ''}" data-mode="solo">
-          <span class="mode-btn-label">SOLO</span>
-          <span class="mode-btn-sub">1 player</span>
-        </button>
-        <button class="mode-btn ${selectedMode === 'coop' ? 'selected' : ''}" data-mode="coop">
-          <span class="mode-btn-label">CO-OP</span>
-          <span class="mode-btn-sub">2 players</span>
+    <div class="menu-row">
+      <div class="menu-section" style="flex:1;">
+        <div class="menu-section-title">MODE</div>
+        <div id="modeButtons" class="mode-row">
+          <button class="mode-btn ${selectedMode === 'solo' ? 'selected' : ''}" data-mode="solo">
+            <span class="mode-btn-label">SOLO</span>
+            <span class="mode-btn-sub">1 player</span>
+          </button>
+          <button class="mode-btn ${selectedMode === 'coop' ? 'selected' : ''}" data-mode="coop">
+            <span class="mode-btn-label">CO-OP</span>
+            <span class="mode-btn-sub">2 players</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="menu-section" style="flex:1;">
+        <div class="menu-section-title">SPEEDRUN · BEST <b style="color:#ffcc44; letter-spacing:2px;">${bestStr}</b></div>
+        <button id="speedrunToggle" class="mode-btn ${selectedSpeedrun ? 'selected' : ''}" style="width:100%;">
+          <span class="mode-btn-label">${selectedSpeedrun ? 'ON' : 'OFF'}</span>
+          <span class="mode-btn-sub">24 waves · titan finale</span>
         </button>
       </div>
     </div>
 
     <div class="menu-section">
-      <div class="menu-section-title">SPEEDRUN</div>
-      <button id="speedrunToggle" class="mode-btn ${selectedSpeedrun ? 'selected' : ''}" style="min-width:280px;">
-        <span class="mode-btn-label">${selectedSpeedrun ? 'ON' : 'OFF'}</span>
-        <span class="mode-btn-sub">30 waves · last wave is the Titan</span>
-      </button>
-      <div style="margin-top:8px; font-size:10px; letter-spacing:2px; color:#aaa;">
-        BEST TIME &nbsp; <b style="color:#ffcc44">${bestStr}</b>
+      <div class="menu-section-title">MAP</div>
+      <div id="mapButtons" class="mode-row">
+        <button class="mode-btn map-btn ${selectedMap === 'forest' ? 'selected' : ''}" data-map="forest">
+          <span class="mode-btn-label">FOREST</span>
+          <span class="mode-btn-sub">default</span>
+        </button>
+        <button class="mode-btn map-btn ${selectedMap === 'arctic' ? 'selected' : ''}" data-map="arctic">
+          <span class="mode-btn-label">ARCTIC</span>
+          <span class="mode-btn-sub">icy</span>
+        </button>
+        <button class="mode-btn map-btn ${selectedMap === 'castle' ? 'selected' : ''}" data-map="castle">
+          <span class="mode-btn-label">CASTLE</span>
+          <span class="mode-btn-sub">stone</span>
+        </button>
       </div>
     </div>
 
@@ -489,7 +522,7 @@ function showStartScreen() {
     </div>
 
     <button id="startBtn" class="start-button">START</button>
-    <div class="credit-tag">by stephen</div>
+    <div class="credit-tag">by stephen<a href="https://github.com/sztephen" target="_blank" rel="noopener noreferrer">github.com/sztephen</a></div>
   `;
   document.getElementById('overlay').style.display = 'flex';
   document.getElementById('hud').style.display = 'none';
@@ -503,6 +536,19 @@ function showStartScreen() {
     showStartScreen();
   });
   wireModeButtons();
+  wireMapButtons();
+}
+
+function wireMapButtons() {
+  const btns = document.querySelectorAll('.map-btn[data-map]');
+  btns.forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectedMap = b.dataset.map;
+      btns.forEach(x => x.classList.toggle('selected', x.dataset.map === selectedMap));
+      SFX.click();
+    });
+  });
 }
 
 function renderSkinPicker() {
@@ -591,11 +637,11 @@ function updateHUD() {
   hudEls.lvl.textContent = p1.level;
   if (world.waveMode) {
     const elapsed = formatTime(world.time);
-    hudEls.time.innerHTML = `<span style="color:#ffcc44">WAVE ${world.wave}/30</span> &nbsp;·&nbsp; ${elapsed}`;
+    hudEls.time.innerHTML = `<span style="color:#ffcc44">WAVE ${world.wave}/24</span> &nbsp;·&nbsp; ${elapsed}`;
   } else {
     const min = Math.floor(world.time / 60).toString().padStart(2, '0');
     const sec = Math.floor(world.time % 60).toString().padStart(2, '0');
-    hudEls.time.innerHTML = `${min}:${sec} <span style="color:#888">/ <span style="color:#ffcc44">15:00</span></span>`;
+    hudEls.time.innerHTML = `${min}:${sec} <span style="color:#888">/ <span style="color:#ffcc44">12:00</span></span>`;
   }
   hudEls.time.style.color = world.titanSpawned ? '#ff6666' : (world.time >= VICTORY_TIME - 30 ? '#ffcc44' : '');
   hudEls.kills.textContent = world.kills;

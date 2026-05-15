@@ -143,6 +143,12 @@ const world = {
   gasPuddles: [],
   spits: [],
   beams: [],
+  spores: [],
+  glues: [],
+  bossBombs: [],
+  splashes: [],
+  flames: [],
+  bananas: [],
   camera: { x: -W / 2, y: -H / 2, shake: 0 },
   time: 0,
   kills: 0,
@@ -175,6 +181,9 @@ const world = {
 
   // Lore intro — see startLoreIntro / tickLore / renderLore.
   lore: null,
+
+  // Selected terrain — set in startGame from the menu.
+  map: 'forest',
 };
 
 // ---------- MAIN LOOP ----------
@@ -226,6 +235,10 @@ function update(dt) {
     p.x += p.vx * dt; p.y += p.vy * dt;
     if (Math.abs(p.vx) + Math.abs(p.vy) > 1) p.animT += dt * 8;
     if (p.vx !== 0) p.facing = p.vx > 0 ? 1 : -1;
+    // Track 2D aim so directional weapons (flamethrower) can fire up/down too.
+    // Falls back to horizontal facing when the player isn't moving.
+    if (ix !== 0 || iy !== 0) p.aimAngle = Math.atan2(iy, ix);
+    else if (p.aimAngle == null) p.aimAngle = p.facing < 0 ? Math.PI : 0;
     if (p.invuln > 0) p.invuln -= dt;
 
     for (const id of p.slots) {
@@ -237,6 +250,13 @@ function update(dt) {
         tickAura(p, dt);
       } else if (id === 'holy') {
         w.cd -= dt; if (w.cd <= 0) { w.cd = w.rate; fireHoly(p); }
+        if (w.potion) {
+          w.potion.cd -= dt;
+          if (w.potion.cd <= 0) {
+            w.potion.cd = w.potion.interval;
+            spawnHolyPotion(p);
+          }
+        }
       } else if (id === 'ice') {
         w.cd -= dt; if (w.cd <= 0) { w.cd = w.rate; fireIce(p); }
         if (w.blizzard) {
@@ -249,6 +269,10 @@ function update(dt) {
         w.cd -= dt; if (w.cd <= 0) { w.cd = w.rate; fireShards(p); }
       } else if (id === 'hole') {
         w.cd -= dt; if (w.cd <= 0) { w.cd = w.rate; fireHole(p); }
+      } else if (id === 'flame') {
+        w.cd -= dt; if (w.cd <= 0) { w.cd = w.rate; fireFlame(p); }
+      } else if (id === 'banana') {
+        w.cd -= dt; if (w.cd <= 0) { w.cd = w.rate; fireBanana(p); }
       }
     }
   }
@@ -292,17 +316,32 @@ function update(dt) {
     if (!tgt) continue;
     if (e.type === 'spitter') {
       tickSpitterAI(e, dt, tgt);
+    } else if (e.type === 'slinger') {
+      tickSlingerAI(e, dt, tgt);
     } else if (e.type === 'exploder') {
       tickExploderAI(e, dt, tgt);
     } else {
       const dx = tgt.x - e.x, dy = tgt.y - e.y;
       const d = Math.hypot(dx, dy) || 1;
-      const slowFactor = (e.slowedUntil > world.time) ? 0.45 : 1.0;
+      const slowFactor = enemySlowFactor(e);
       e.vx = (dx / d) * e.speed * slowFactor;
       e.vy = (dy / d) * e.speed * slowFactor;
     }
     e.animT += dt * 4;
     if (e.hit > 0) e.hit -= dt;
+    // Reset ice stacks once the slow has expired so future ice shots start
+    // at the gentlest stage again.
+    if (e.iceStacks && e.slowedUntil <= world.time) e.iceStacks = 0;
+    // Burn DoT (flamethrower buff): periodic damage while burnUntil is in the
+    // future — flame ticks refresh burnUntil while in cone, so this only "bites"
+    // after the enemy leaves the cone.
+    if (e.burnUntil && e.burnUntil > world.time) {
+      e.burnTickT = (e.burnTickT || 0) - dt;
+      if (e.burnTickT <= 0) {
+        e.burnTickT = 0.4;
+        damageEnemy(e, e.burnDmg || 0, e.burnSource || null, 'flame');
+      }
+    }
   }
   // Spatial-hash enemy-enemy collisions.
   const CELL = 24;
@@ -363,6 +402,7 @@ function update(dt) {
     if (b.kind === 'holy') {
       b.t += dt;
       const t = b.t / b.dur;
+      if (t < 0) continue; // staggered launch delay — wait, then animate
       if (t >= 1) {
         world.puddles.push({
           x: b.tx, y: b.ty, r: b.puddleRadius,
@@ -370,8 +410,21 @@ function update(dt) {
           life: b.duration, maxLife: b.duration,
           healPerTick: b.healPerTick || 0,
           owner: b.owner,
+          super: !!b.super,
         });
-        spawnParticles(b.tx, b.ty, 14, { colors: ['#88ccff', '#fff', '#aaeeff'], speed: 70, life: 0.4, gravity: 60 });
+        // Splash burst: outward droplets + a brief expanding ring overlay.
+        for (let i = 0; i < 22; i++) {
+          const a = Math.random() * TAU;
+          const s = rand(50, 160);
+          world.particles.push({
+            x: b.tx, y: b.ty,
+            vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60,
+            life: rand(0.35, 0.7), maxLife: 0.7, size: 1,
+            color: ['#aae0ff', '#fff', '#66bbff', '#3a8acc'][irand(0, 3)],
+            gravity: 240,
+          });
+        }
+        world.splashes.push({ x: b.tx, y: b.ty, r: 0, rMax: b.puddleRadius * 1.1, life: 0.35, maxLife: 0.35, super: !!b.super });
         SFX.holySplash();
         b.life = -1;
         continue;
@@ -399,6 +452,13 @@ function update(dt) {
           if (b.hits.has(e)) continue;
           b.hits.add(e);
           damageEnemy(e, b.dmg, b.owner, 'ice');
+          // Compound slow: if already slowed, deepen one stage (cap 3);
+          // otherwise this hit is the first stack.
+          if (e.slowedUntil > world.time) {
+            e.iceStacks = Math.min(3, (e.iceStacks || 1) + 1);
+          } else {
+            e.iceStacks = 1;
+          }
           e.slowedUntil = Math.max(e.slowedUntil, world.time + b.slow);
           spawnParticles(b.x, b.y, 8, { colors: ['#aaddff', '#fff', '#66bbff'], speed: 70, life: 0.35, gravity: 0 });
           b.life = 0;
@@ -461,9 +521,11 @@ function update(dt) {
   }
   compact(world.puddles, pd => pd.life > 0);
 
-  // ----- shards / holes -----
+  // ----- shards / holes / flames / bananas -----
   tickShards(dt);
   tickHoles(dt);
+  tickFlames(dt);
+  tickBananas(dt);
 
   // ----- lightning visuals fade -----
   for (const l of world.lightning) l.life -= dt;
@@ -560,6 +622,109 @@ function update(dt) {
     sp.y = sp.sy + (sp.ty - sp.sy) * k - Math.sin(k * Math.PI) * 24;
   }
   compact(world.spits, sp => !sp.dead);
+
+  // ----- bloomling spores (linger, damage on contact) -----
+  for (const sp of world.spores) {
+    sp.life -= dt;
+    sp.dmgTimer -= dt;
+    sp.bob += dt * 5;
+    if (sp.dmgTimer <= 0) {
+      sp.dmgTimer = sp.dmgInterval;
+      const r2 = sp.r * sp.r;
+      for (const pl of world.players) {
+        if (!pl || pl.dead || pl.invuln > 0) continue;
+        const dx = pl.x - sp.x, dy = pl.y - sp.y;
+        if (dx * dx + dy * dy < r2) {
+          pl.hp -= sp.dmg;
+          pl.invuln = 0.3;
+          SFX.hurt();
+          if (pl.hp <= 0) downPlayer(pl);
+        }
+      }
+    }
+    if (Math.random() < 0.4) {
+      const a = Math.random() * TAU;
+      const rr = Math.random() * sp.r;
+      world.particles.push({
+        x: sp.x + Math.cos(a) * rr,
+        y: sp.y + Math.sin(a) * rr,
+        vx: 0, vy: -10,
+        life: 0.45, maxLife: 0.45, size: 1,
+        color: ['#ff66aa', '#aaff66', '#ffaadd'][irand(0, 2)],
+        gravity: -20,
+      });
+    }
+  }
+  compact(world.spores, sp => sp.life > 0);
+
+  // ----- slinger glue projectiles (fast, slow + damage on hit) -----
+  for (const gl of world.glues) {
+    gl.life -= dt;
+    gl.x += gl.vx * dt;
+    gl.y += gl.vy * dt;
+    if (Math.random() < 0.5) {
+      world.particles.push({
+        x: gl.x, y: gl.y, vx: 0, vy: 6,
+        life: 0.25, maxLife: 0.25, size: 1,
+        color: '#88cc44', gravity: 40,
+      });
+    }
+    for (const pl of world.players) {
+      if (!pl || pl.dead || pl.invuln > 0 || gl.dead) continue;
+      const dx = pl.x - gl.x, dy = pl.y - gl.y;
+      if (dx * dx + dy * dy < 8 * 8) {
+        pl.hp -= gl.dmg;
+        pl.invuln = 0.35;
+        pl.slowedUntil = Math.max(pl.slowedUntil, world.time + 1.8);
+        SFX.hurt();
+        spawnParticles(gl.x, gl.y, 10, { colors: ['#88cc44', '#aaff66', '#446622'], speed: 70, life: 0.4, gravity: 30 });
+        gl.dead = true;
+        if (pl.hp <= 0) downPlayer(pl);
+      }
+    }
+  }
+  compact(world.glues, gl => !gl.dead && gl.life > 0);
+
+  // ----- Stephen's bombs (arc-throw → area explode) -----
+  for (const bm of world.bossBombs) {
+    bm.t += dt;
+    const k = bm.t / bm.dur;
+    if (k >= 1) {
+      const r = bm.explodeR;
+      const r2 = r * r;
+      for (const pl of world.players) {
+        if (!pl || pl.dead || pl.invuln > 0) continue;
+        const dx = pl.x - bm.tx, dy = pl.y - bm.ty;
+        if (dx * dx + dy * dy < r2) {
+          pl.hp -= bm.dmg;
+          pl.invuln = 0.5;
+          SFX.hurt();
+          if (pl.hp <= 0) downPlayer(pl);
+        }
+      }
+      world.camera.shake = Math.max(world.camera.shake, 9);
+      world.flash = Math.max(world.flash, 0.4);
+      for (let i = 0; i < 26; i++) {
+        const a = Math.random() * TAU;
+        const s = rand(80, 240);
+        world.particles.push({
+          x: bm.tx, y: bm.ty, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+          life: rand(0.4, 0.9), maxLife: 0.9, size: 2,
+          color: ['#ffcc44', '#ff6600', '#ff3300', '#fff'][irand(0, 3)], gravity: 0,
+        });
+      }
+      SFX.exploderBoom();
+      bm.dead = true;
+      continue;
+    }
+    bm.x = bm.sx + (bm.tx - bm.sx) * k;
+    bm.y = bm.sy + (bm.ty - bm.sy) * k - Math.sin(k * Math.PI) * 50;
+  }
+  compact(world.bossBombs, bm => !bm.dead);
+
+  // ----- holy splashes (visual only) -----
+  for (const sp of world.splashes) sp.life -= dt;
+  compact(world.splashes, sp => sp.life > 0);
 
   // ----- gas puddles (player-hazard, possibly slowing) -----
   for (const gp of world.gasPuddles) {
@@ -826,10 +991,13 @@ function render() {
   const startY = Math.floor(camY / TS) - 1;
   const endX = startX + Math.ceil(W / TS) + 2;
   const endY = startY + Math.ceil(H / TS) + 2;
+  // [base, accent, rare] for the active map.
+  const mapTiles = (MAPS[world.map] || MAPS.forest).tiles;
+  const tBase = mapTiles[0], tAcc = mapTiles[1], tRare = mapTiles[2];
   for (let ty = startY; ty < endY; ty++) {
     for (let tx = startX; tx < endX; tx++) {
       const h = ((tx * 928371) ^ (ty * 213213)) & 15;
-      const t = h === 0 ? tile3 : h < 4 ? tile2 : tile;
+      const t = h === 0 ? tRare : h < 4 ? tAcc : tBase;
       ctx.drawImage(t, tx * TS - camX, ty * TS - camY);
     }
   }
@@ -851,14 +1019,39 @@ function render() {
     ctx.globalAlpha = 1;
   }
 
+  // Holy water splash rings (brief impact flourish — sits above puddles).
+  for (const sp of world.splashes) {
+    const k = 1 - sp.life / sp.maxLife;
+    const r = sp.rMax * (0.3 + k * 0.7);
+    const a = sp.life / sp.maxLife;
+    ctx.globalAlpha = 0.85 * a;
+    ctx.strokeStyle = sp.super ? '#ffcc44' : '#aae0ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(sp.x - camX, sp.y - camY, r, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = sp.super ? '#ffe088' : '#fff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(sp.x - camX, sp.y - camY, r * 0.7, 0, TAU);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // Holy puddles
   for (const pd of world.puddles) {
     const a = clamp(pd.life / pd.maxLife, 0, 1);
     ctx.globalAlpha = 0.5 * a;
     const grad = ctx.createRadialGradient(pd.x - camX, pd.y - camY, 1, pd.x - camX, pd.y - camY, pd.r);
-    grad.addColorStop(0, 'rgba(170, 220, 255, 0.7)');
-    grad.addColorStop(0.7, 'rgba(100, 180, 255, 0.4)');
-    grad.addColorStop(1, 'rgba(100, 180, 255, 0)');
+    if (pd.super) {
+      grad.addColorStop(0, 'rgba(255, 220, 140, 0.85)');
+      grad.addColorStop(0.7, 'rgba(255, 140, 40, 0.45)');
+      grad.addColorStop(1, 'rgba(255, 140, 40, 0)');
+    } else {
+      grad.addColorStop(0, 'rgba(170, 220, 255, 0.7)');
+      grad.addColorStop(0.7, 'rgba(100, 180, 255, 0.4)');
+      grad.addColorStop(1, 'rgba(100, 180, 255, 0)');
+    }
     ctx.fillStyle = grad;
     ctx.fillRect(pd.x - camX - pd.r, pd.y - camY - pd.r * 0.6, pd.r * 2, pd.r * 1.2);
     ctx.globalAlpha = 1;
@@ -886,13 +1079,22 @@ function render() {
     if (!pl || pl.dead || !pl.weapons.aura) continue;
     const r = pl.weapons.aura.radius * pl.mods.areaMult;
     const af = world.auraFlash;
+    const isSuper = weaponIsSuper(pl, 'aura');
     const grad = ctx.createRadialGradient(pl.x - camX, pl.y - camY, 4, pl.x - camX, pl.y - camY, r);
-    grad.addColorStop(0, `rgba(255, 102, 204, ${0.25 + af * 0.35})`);
-    grad.addColorStop(0.7, `rgba(180, 60, 200, ${0.12 + af * 0.2})`);
-    grad.addColorStop(1, 'rgba(180, 60, 200, 0)');
+    if (isSuper) {
+      grad.addColorStop(0, `rgba(255, 200, 80, ${0.30 + af * 0.4})`);
+      grad.addColorStop(0.7, `rgba(255, 120, 30, ${0.14 + af * 0.22})`);
+      grad.addColorStop(1, 'rgba(255, 120, 30, 0)');
+    } else {
+      grad.addColorStop(0, `rgba(255, 102, 204, ${0.25 + af * 0.35})`);
+      grad.addColorStop(0.7, `rgba(180, 60, 200, ${0.12 + af * 0.2})`);
+      grad.addColorStop(1, 'rgba(180, 60, 200, 0)');
+    }
     ctx.fillStyle = grad;
     ctx.fillRect(pl.x - camX - r, pl.y - camY - r, r * 2, r * 2);
-    ctx.strokeStyle = `rgba(255, 102, 204, ${0.55 + pulse * 0.25 + af * 0.4})`;
+    ctx.strokeStyle = isSuper
+      ? `rgba(255, 180, 60, ${0.6 + pulse * 0.3 + af * 0.4})`
+      : `rgba(255, 102, 204, ${0.55 + pulse * 0.25 + af * 0.4})`;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(pl.x - camX, pl.y - camY, r, 0, TAU);
@@ -931,6 +1133,47 @@ function render() {
   // Shards (over entities)
   for (const s of world.shards) drawShard(s, camX, camY);
 
+  // Bananas (boomerangs) — spin while flying.
+  for (const b of world.bananas) {
+    ctx.save();
+    ctx.translate(Math.floor(b.x - camX), Math.floor(b.y - camY));
+    ctx.rotate(b.spin);
+    if (b.super) {
+      // Orange glow under the banana when super.
+      const grad = ctx.createRadialGradient(0, 0, 1, 0, 0, 10);
+      grad.addColorStop(0, 'rgba(255, 180, 60, 0.55)');
+      grad.addColorStop(1, 'rgba(255, 140, 30, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(-10, -10, 20, 20);
+    }
+    ctx.drawImage(bananaSprite, -5, -4);
+    ctx.restore();
+  }
+
+  // Flamethrower cones — translucent wedge with a brighter inner band.
+  for (const fl of world.flames) {
+    const fade = clamp(fl.life / fl.maxLife, 0, 1);
+    const x = fl.x - camX, y = fl.y - camY;
+    // Outer cone (orange).
+    ctx.save();
+    ctx.globalAlpha = 0.45 * fade;
+    ctx.fillStyle = fl.super ? '#ffcc44' : '#ff8a1a';
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, fl.range, fl.angle - fl.halfAngle, fl.angle + fl.halfAngle);
+    ctx.closePath();
+    ctx.fill();
+    // Inner cone (white-hot core).
+    ctx.globalAlpha = 0.6 * fade;
+    ctx.fillStyle = '#ffe088';
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, fl.range * 0.55, fl.angle - fl.halfAngle * 0.55, fl.angle + fl.halfAngle * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   // Bullets
   for (const b of world.bullets) drawBullet(b, camX, camY);
 
@@ -940,10 +1183,12 @@ function render() {
     ctx.globalAlpha = a;
     ctx.lineWidth = 2;
     const segs = l.segs || 6;
+    const outer = l.super ? '#ff8a1a' : '#ffee66';
+    const inner = l.super ? '#ffe088' : '#fff';
     for (let i = 1; i < l.points.length; i++) {
       const p0 = l.points[i - 1], p1 = l.points[i];
       const row = l.jitter ? l.jitter[i - 1] : null;
-      ctx.strokeStyle = '#ffee66';
+      ctx.strokeStyle = outer;
       ctx.beginPath();
       ctx.moveTo(p0.x - camX, p0.y - camY);
       for (let s = 1; s < segs; s++) {
@@ -954,7 +1199,7 @@ function render() {
       }
       ctx.lineTo(p1.x - camX, p1.y - camY);
       ctx.stroke();
-      ctx.strokeStyle = '#fff';
+      ctx.strokeStyle = inner;
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.lineWidth = 2;
@@ -988,6 +1233,78 @@ function render() {
     ctx.fillStyle = '#ffaa00';
     ctx.fillRect(Math.floor(tn.x - camX - 1), Math.floor(tn.y - camY - 1), 2, 2);
     ctx.globalAlpha = 1;
+  }
+
+  // Bloomling spores (lingering hazards)
+  for (const sp of world.spores) {
+    const a = clamp(sp.life / sp.maxLife, 0, 1);
+    const bob = Math.sin(sp.bob) * 1.5;
+    const cx = Math.floor(sp.x - camX);
+    const cy = Math.floor(sp.y - camY + bob);
+    ctx.globalAlpha = 0.55 * a;
+    const grad = ctx.createRadialGradient(cx, cy, 1, cx, cy, sp.r);
+    grad.addColorStop(0, 'rgba(255, 170, 220, 0.85)');
+    grad.addColorStop(0.6, 'rgba(170, 255, 102, 0.45)');
+    grad.addColorStop(1, 'rgba(170, 255, 102, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - sp.r, cy - sp.r, sp.r * 2, sp.r * 2);
+    ctx.globalAlpha = a * 0.9;
+    ctx.fillStyle = '#ff66aa';
+    ctx.fillRect(cx - 2, cy - 2, 4, 4);
+    ctx.fillStyle = '#ffaadd';
+    ctx.fillRect(cx - 1, cy - 1, 2, 2);
+    ctx.globalAlpha = 1;
+  }
+
+  // Slinger glue projectiles (fast green globs)
+  for (const gl of world.glues) {
+    const cx = Math.floor(gl.x - camX);
+    const cy = Math.floor(gl.y - camY);
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = '#446622';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#88cc44';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#aaff66';
+    ctx.beginPath();
+    ctx.arc(cx - 1, cy - 1, 1.5, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Stephen's bombs (arcing, sparking)
+  for (const bm of world.bossBombs) {
+    const cx = Math.floor(bm.x - camX);
+    const cy = Math.floor(bm.y - camY);
+    // Target marker on ground.
+    const k = bm.t / bm.dur;
+    const tx = Math.floor(bm.tx - camX);
+    const ty = Math.floor(bm.ty - camY);
+    ctx.globalAlpha = 0.4 + 0.4 * Math.sin(world.time * 18);
+    ctx.strokeStyle = '#ff6600';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(tx, ty, bm.explodeR * (0.4 + k * 0.6), 0, TAU);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // Bomb body.
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(cx - 2, cy - 4, 1, 2);
+    // Fuse spark.
+    if (((world.time * 20) | 0) % 2 === 0) {
+      ctx.fillStyle = '#ffcc44';
+      ctx.fillRect(cx - 1, cy - 5, 2, 2);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx, cy - 5, 1, 1);
+    }
   }
 
   // Spit projectiles
@@ -1270,6 +1587,7 @@ function drawBoss(e, camX, camY) {
   else if (id === 'juggernaut')  drawJuggernaut(e, x, y, bob, hit);
   else if (id === 'hivequeen')   drawHiveQueen(e, x, y, bob, hit);
   else if (id === 'plague')      drawPlagueDoctor(e, x, y, bob, hit);
+  else if (id === 'stephen')     drawStephen(e, x, y, bob, hit);
   else if (id === 'titan')       drawTitan(e, x, y, bob, hit);
   else                            drawGenericBoss(e, x, y, bob, hit);
 
@@ -1654,17 +1972,111 @@ function drawPlagueDoctor(e, x, y, bob, hit) {
   ctx.fillRect(x - 4, top + 1, 8, 1);
 }
 
-function drawTitan(e, x, y, bob, hit) {
-  // Massive armored colossus — meant to feel like the final boss.
-  const body = hit ? '#fff' : '#7a2a14';
-  const armor = hit ? '#fff' : '#4a1a08';
-  const plate = hit ? '#fff' : '#aa4020';
-  const glow = hit ? '#fff' : '#ffcc44';
+function drawStephen(e, x, y, bob, hit) {
+  // Burly orange-clad brawler holding a lit bomb. Wide stance, heavy boots,
+  // glowing yellow eyes — meant to feel mid-tier between Juggernaut and Titan.
+  const body = hit ? '#fff' : '#ff8a1a';
+  const bodyHi = hit ? '#fff' : '#ffb050';
+  const dark = hit ? '#fff' : '#5a2a08';
+  const skin = hit ? '#fff' : '#e8c098';
+  const glow = hit ? '#fff' : '#fff066';
   const top = y - e.h / 2 + bob;
-  // Background heat haze halo.
-  ctx.fillStyle = `rgba(255, 150, 60, ${0.25 + 0.15 * Math.sin(world.time * 4)})`;
+  // Heat haze halo because he's tanky and threatening.
+  ctx.fillStyle = `rgba(255, 150, 60, ${0.18 + 0.10 * Math.sin(world.time * 5)})`;
   ctx.beginPath();
   ctx.arc(x, y, e.w * 0.65, 0, TAU);
+  ctx.fill();
+  // Legs / boots.
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - e.w / 2 + 4, y + e.h / 2 + bob - 10, 8, 10);
+  ctx.fillRect(x + e.w / 2 - 12, y + e.h / 2 + bob - 10, 8, 10);
+  ctx.fillStyle = bodyHi;
+  ctx.fillRect(x - e.w / 2 + 4, y + e.h / 2 + bob - 10, 8, 2);
+  ctx.fillRect(x + e.w / 2 - 12, y + e.h / 2 + bob - 10, 8, 2);
+  // Torso vest.
+  ctx.fillStyle = body;
+  ctx.fillRect(x - e.w / 2 + 3, top + 14, e.w - 6, e.h - 24);
+  ctx.fillStyle = bodyHi;
+  ctx.fillRect(x - e.w / 2 + 3, top + 14, e.w - 6, 3);
+  // Vest center seam + buttons.
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - 1, top + 14, 2, e.h - 24);
+  ctx.fillStyle = glow;
+  for (let i = 0; i < 3; i++) ctx.fillRect(x - 1, top + 18 + i * 5, 2, 1);
+  // Belt.
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - e.w / 2 + 3, y + bob + 6, e.w - 6, 3);
+  ctx.fillStyle = glow;
+  ctx.fillRect(x - 2, y + bob + 7, 4, 1);
+  // Shoulders — chunky pads.
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - e.w / 2, top + 12, 10, 6);
+  ctx.fillRect(x + e.w / 2 - 10, top + 12, 10, 6);
+  ctx.fillStyle = body;
+  ctx.fillRect(x - e.w / 2 + 1, top + 13, 8, 3);
+  ctx.fillRect(x + e.w / 2 - 9, top + 13, 8, 3);
+  // Arms.
+  ctx.fillStyle = skin;
+  ctx.fillRect(x - e.w / 2 + 1, top + 18, 5, 10);
+  ctx.fillRect(x + e.w / 2 - 6, top + 18, 5, 10);
+  // Right hand holds a bomb.
+  const bombX = x + e.w / 2 - 4;
+  const bombY = top + 28;
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.arc(bombX, bombY, 4, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#3a3a3a';
+  ctx.fillRect(bombX - 1, bombY - 5, 1, 2);
+  // Sparking fuse.
+  const sparkOn = ((world.time * 16) | 0) % 2 === 0;
+  if (sparkOn) {
+    ctx.fillStyle = '#ffcc44';
+    ctx.fillRect(bombX - 1, bombY - 7, 2, 2);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(bombX, bombY - 7, 1, 1);
+  }
+  // Head.
+  ctx.fillStyle = skin;
+  ctx.fillRect(x - 6, top + 4, 12, 10);
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - 6, top + 4, 12, 2);
+  // Hair / brow tuft.
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - 7, top + 2, 14, 3);
+  ctx.fillRect(x - 5, top, 4, 2);
+  ctx.fillRect(x + 1, top, 4, 2);
+  // Glowing yellow eyes.
+  ctx.fillStyle = '#000';
+  ctx.fillRect(x - 4, top + 7, 3, 2);
+  ctx.fillRect(x + 1, top + 7, 3, 2);
+  ctx.fillStyle = glow;
+  ctx.fillRect(x - 4, top + 7, 2, 1);
+  ctx.fillRect(x + 1, top + 7, 2, 1);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(x - 3, top + 7, 1, 1);
+  ctx.fillRect(x + 2, top + 7, 1, 1);
+  // Grin.
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - 3, top + 11, 6, 2);
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 3; i++) ctx.fillRect(x - 3 + i * 2, top + 11, 1, 1);
+}
+
+function drawTitan(e, x, y, bob, hit) {
+  // Massive armored colossus — meant to feel like the final boss.
+  const enraged = e.enraged;
+  const body = hit ? '#fff' : (enraged ? '#cc1a14' : '#7a2a14');
+  const armor = hit ? '#fff' : (enraged ? '#7a0a08' : '#4a1a08');
+  const plate = hit ? '#fff' : (enraged ? '#ff5050' : '#aa4020');
+  const glow = hit ? '#fff' : (enraged ? '#ffee44' : '#ffcc44');
+  const top = y - e.h / 2 + bob;
+  // Background heat haze halo — angrier and faster when enraged.
+  ctx.fillStyle = enraged
+    ? `rgba(255, 60, 40, ${0.35 + 0.20 * Math.sin(world.time * 7)})`
+    : `rgba(255, 150, 60, ${0.25 + 0.15 * Math.sin(world.time * 4)})`;
+  ctx.beginPath();
+  ctx.arc(x, y, e.w * (enraged ? 0.78 : 0.65), 0, TAU);
   ctx.fill();
   // Legs.
   ctx.fillStyle = armor;
@@ -1738,8 +2150,16 @@ function drawTitan(e, x, y, bob, hit) {
 
 function drawBullet(b, camX, camY) {
   if (b.kind === 'knife') {
+    if (b.super) {
+      // Orange glow trail.
+      const grad = ctx.createRadialGradient(b.x - camX, b.y - camY, 1, b.x - camX, b.y - camY, 9);
+      grad.addColorStop(0, 'rgba(255, 200, 80, 0.6)');
+      grad.addColorStop(1, 'rgba(255, 140, 30, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(b.x - camX - 9, b.y - camY - 9, 18, 18);
+    }
     ctx.globalAlpha = 0.4;
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = b.super ? '#ffe088' : '#fff';
     for (let i = 1; i <= 3; i++) {
       ctx.fillRect(Math.floor(b.x - camX - b.vx * 0.02 * i), Math.floor(b.y - camY - b.vy * 0.02 * i), 1, 1);
     }
@@ -1747,29 +2167,74 @@ function drawBullet(b, camX, camY) {
     ctx.save();
     ctx.translate(Math.floor(b.x - camX), Math.floor(b.y - camY));
     ctx.rotate(b.angle);
-    ctx.drawImage(knifeSprite, -5, -2);
+    if (b.super) {
+      // Tint the knife sprite orange by drawing it then overlaying a color.
+      ctx.drawImage(knifeSprite, -5, -2);
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = 'rgba(255, 138, 26, 0.65)';
+      ctx.fillRect(-5, -2, 10, 5);
+      ctx.globalCompositeOperation = 'source-over';
+    } else {
+      ctx.drawImage(knifeSprite, -5, -2);
+    }
     ctx.restore();
   } else if (b.kind === 'ice') {
     const grad = ctx.createRadialGradient(b.x - camX, b.y - camY, 1, b.x - camX, b.y - camY, 10);
-    grad.addColorStop(0, 'rgba(170, 220, 255, 0.55)');
-    grad.addColorStop(1, 'rgba(170, 220, 255, 0)');
+    if (b.super) {
+      grad.addColorStop(0, 'rgba(255, 210, 120, 0.65)');
+      grad.addColorStop(1, 'rgba(255, 140, 30, 0)');
+    } else {
+      grad.addColorStop(0, 'rgba(170, 220, 255, 0.55)');
+      grad.addColorStop(1, 'rgba(170, 220, 255, 0)');
+    }
     ctx.fillStyle = grad;
     ctx.fillRect(b.x - camX - 10, b.y - camY - 10, 20, 20);
     ctx.save();
     ctx.translate(Math.floor(b.x - camX), Math.floor(b.y - camY));
     ctx.rotate(b.angle + Math.PI / 2);
     ctx.drawImage(iceShardSprite, -4, -5);
+    if (b.super) {
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = 'rgba(255, 138, 26, 0.7)';
+      ctx.fillRect(-4, -5, 8, 10);
+      ctx.globalCompositeOperation = 'source-over';
+    }
     ctx.restore();
   } else if (b.kind === 'holy') {
+    if (b.t < 0) return; // launch delay — bottle not yet in flight
+    // Brief shadow on the ground beneath the arc — sells the height.
+    const t = b.t / b.dur;
+    const groundX = b.sx + (b.tx - b.sx) * t;
+    const groundY = b.sy + (b.ty - b.sy) * t;
+    ctx.globalAlpha = 0.35 * (1 - Math.sin(t * Math.PI) * 0.6);
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(groundX - camX, groundY - camY + 2, 3, 1, 0, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    // Tumbling bottle — slight bob and continuous rotation so it reads as flying.
     ctx.save();
     ctx.translate(Math.floor(b.x - camX), Math.floor(b.y - camY));
-    ctx.rotate(b.t * 6);
+    ctx.rotate(b.t * 8);
     ctx.drawImage(holyWaterSprite, -4, -5);
+    if (b.super) {
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = 'rgba(255, 140, 30, 0.75)';
+      ctx.fillRect(-4, -5, 8, 11);
+      ctx.globalCompositeOperation = 'source-over';
+    }
     ctx.restore();
-    if (Math.random() < 0.5) {
+    // Constant droplet trail — denser than before so each bottle leaves a
+    // visible streak from the thrower to the target.
+    for (let i = 0; i < 2; i++) {
       world.particles.push({
-        x: b.x, y: b.y, vx: 0, vy: 20,
-        life: 0.25, maxLife: 0.25, size: 1, color: '#aae0ff', gravity: 60,
+        x: b.x + rand(-1, 1), y: b.y + rand(-1, 1),
+        vx: rand(-10, 10), vy: 20,
+        life: 0.3, maxLife: 0.3, size: 1,
+        color: b.super
+          ? (i === 0 ? '#ffe088' : '#ff8a1a')
+          : (i === 0 ? '#aae0ff' : '#66bbff'),
+        gravity: 80,
       });
     }
   } else if (b.kind === 'shardFrag') {
@@ -1778,6 +2243,12 @@ function drawBullet(b, camX, camY) {
     ctx.rotate(b.angle + Math.PI / 2);
     ctx.scale(0.7, 0.7);
     ctx.drawImage(iceShardSprite, -4, -5);
+    if (b.super) {
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = 'rgba(255, 138, 26, 0.7)';
+      ctx.fillRect(-4, -5, 8, 10);
+      ctx.globalCompositeOperation = 'source-over';
+    }
     ctx.restore();
   }
 }
@@ -1789,11 +2260,22 @@ function drawShard(s, camX, camY) {
   ctx.scale(1.1, 1.1);
   // Glow
   const grad = ctx.createRadialGradient(0, 0, 1, 0, 0, 8);
-  grad.addColorStop(0, 'rgba(220, 240, 255, 0.6)');
-  grad.addColorStop(1, 'rgba(220, 240, 255, 0)');
+  if (s.super) {
+    grad.addColorStop(0, 'rgba(255, 210, 120, 0.75)');
+    grad.addColorStop(1, 'rgba(255, 140, 30, 0)');
+  } else {
+    grad.addColorStop(0, 'rgba(220, 240, 255, 0.6)');
+    grad.addColorStop(1, 'rgba(220, 240, 255, 0)');
+  }
   ctx.fillStyle = grad;
   ctx.fillRect(-8, -8, 16, 16);
   ctx.drawImage(iceShardSprite, -4, -5);
+  if (s.super) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = 'rgba(255, 138, 26, 0.7)';
+    ctx.fillRect(-4, -5, 8, 10);
+    ctx.globalCompositeOperation = 'source-over';
+  }
   ctx.restore();
 }
 
@@ -1806,23 +2288,32 @@ function drawHole(h, camX, camY) {
   const ring = 0.6 + 0.4 * Math.sin(world.time * 8);
   ctx.globalAlpha = 0.8;
   const grad = ctx.createRadialGradient(x, y, 1, x, y, r);
-  grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
-  grad.addColorStop(0.4, 'rgba(40, 8, 70, 0.85)');
-  grad.addColorStop(0.85, `rgba(170, 68, 221, ${0.35 * ring})`);
-  grad.addColorStop(1, 'rgba(170, 68, 221, 0)');
+  if (h.super) {
+    grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+    grad.addColorStop(0.4, 'rgba(70, 28, 8, 0.9)');
+    grad.addColorStop(0.85, `rgba(255, 138, 26, ${0.45 * ring})`);
+    grad.addColorStop(1, 'rgba(255, 138, 26, 0)');
+  } else {
+    grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+    grad.addColorStop(0.4, 'rgba(40, 8, 70, 0.85)');
+    grad.addColorStop(0.85, `rgba(170, 68, 221, ${0.35 * ring})`);
+    grad.addColorStop(1, 'rgba(170, 68, 221, 0)');
+  }
   ctx.fillStyle = grad;
   ctx.fillRect(x - r, y - r, r * 2, r * 2);
   ctx.globalAlpha = 1;
   // Implosion glow toward end.
   if (t > 0.7) {
     const glow = (t - 0.7) / 0.3;
-    ctx.fillStyle = `rgba(255, 204, 68, ${glow * 0.5})`;
+    ctx.fillStyle = h.super ? `rgba(255, 230, 140, ${glow * 0.7})` : `rgba(255, 204, 68, ${glow * 0.5})`;
     ctx.beginPath();
     ctx.arc(x, y, r * 0.4, 0, TAU);
     ctx.fill();
   }
   // Inner rim.
-  ctx.strokeStyle = `rgba(220, 160, 255, ${0.6 * ring})`;
+  ctx.strokeStyle = h.super
+    ? `rgba(255, 200, 100, ${0.7 * ring})`
+    : `rgba(220, 160, 255, ${0.6 * ring})`;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.arc(x, y, r * 0.95, 0, TAU);
@@ -1895,6 +2386,7 @@ function drawPickup(pk, camX, camY) {
 // Maps a wave number to the mid-game-time we'd be at in a normal run, so the
 // spawn table (tier gating, brute/spitter unlocks, lateGameMult) lines up with
 // the player's progression.
+const TOTAL_WAVES = 24;
 function waveMappedTime(N) { return N * 30 - 15; }
 
 // How many enemies to spawn over the wave, based on the normal-game spawner's
@@ -1912,9 +2404,9 @@ function startWave(N) {
   world.waveQueued = 0;
   world.waveSpawnCd = 0;
   world.waveSpawnTime = null;
-  if (N === 30) {
+  if (N === TOTAL_WAVES) {
     // Final wave is the Titan — clear the field and spawn it like the normal mode.
-    world.waveBanner = { t: 3.0, tMax: 3.0, line1: 'WAVE 30 / 30', line2: 'THE TITAN APPROACHES' };
+    world.waveBanner = { t: 3.0, tMax: 3.0, line1: `WAVE ${TOTAL_WAVES} / ${TOTAL_WAVES}`, line2: 'THE TITAN APPROACHES' };
     world.titanSpawned = true;
     spawnTitan();
     return;
@@ -1931,7 +2423,15 @@ function startWave(N) {
   const maxTicks = Math.max(1, Math.floor(MAX_SPAWN_TIME / world.waveSpawnRate));
   const requiredBurst = Math.ceil(world.waveQueued / maxTicks);
   if (requiredBurst > world.waveBurst) world.waveBurst = requiredBurst;
-  world.waveBanner = { t: 2.0, tMax: 2.0, line1: `WAVE ${N} / 30`, line2: `${world.waveQueued} ENEMIES` };
+  // Every 4th wave (except the final titan wave) drops a normal boss alongside
+  // the spawn queue — same boss-pool roll as normal mode.
+  const isBossWave = N % 4 === 0 && N < TOTAL_WAVES;
+  if (isBossWave) {
+    spawnBoss();
+    world.waveBanner = { t: 2.6, tMax: 2.6, line1: `WAVE ${N} / ${TOTAL_WAVES} — BOSS`, line2: `${world.waveQueued} ENEMIES + BOSS` };
+  } else {
+    world.waveBanner = { t: 2.0, tMax: 2.0, line1: `WAVE ${N} / ${TOTAL_WAVES}`, line2: `${world.waveQueued} ENEMIES` };
+  }
   SFX.bossSpawn();
 }
 
@@ -1941,7 +2441,7 @@ function updateWaveSpawner(dt) {
     if (world.waveIntermissionT <= 0) startWave(world.wave + 1);
     return;
   }
-  if (world.wave === 30) return; // Titan handles itself
+  if (world.wave === TOTAL_WAVES) return; // Titan handles itself
   // Drain the queue at the wave's natural rate.
   if (world.waveQueued > 0) {
     world.waveSpawnCd -= dt;
@@ -1955,7 +2455,7 @@ function updateWaveSpawner(dt) {
   }
   // Queue is empty — wait for the field to be clear, then queue up next wave.
   if (world.enemies.length === 0) {
-    if (world.wave < 30) {
+    if (world.wave < TOTAL_WAVES) {
       world.waveBanner = { t: 1.5, tMax: 1.5, line1: `WAVE ${world.wave} CLEAR`, line2: 'NEXT WAVE INCOMING' };
       world.waveIntermissionT = 1.5;
     }
@@ -1995,7 +2495,7 @@ function buildLoreScript(players, isSpeedrun) {
     beats = [
       makeLoreBeat(['THE DEAD WALK.', 'THE LIVING DO NOT.'], 'horde', false),
       makeLoreBeat([`${skin(p1)},`, desc(p1), 'STANDS ALONE.'], 'hero', false),
-      makeLoreBeat(['FIFTEEN MINUTES UNTIL', 'THE TITAN WAKES.', '— SURVIVE —'], 'titan', false),
+      makeLoreBeat(['TWELVE MINUTES UNTIL', 'THE TITAN WAKES.', '— SURVIVE —'], 'titan', false),
     ];
   } else if (!isCoop && isSpeedrun) {
     beats = [
@@ -2007,7 +2507,7 @@ function buildLoreScript(players, isSpeedrun) {
     beats = [
       makeLoreBeat(['WHERE ONE FALLS,', 'TWO STAND.'], 'horde', false),
       makeLoreBeat([`${skin(p1)} AND ${skin(p2)}`, 'BOUND AGAINST THE NIGHT.'], 'hero', false),
-      makeLoreBeat(['FIFTEEN MINUTES UNTIL', 'THE TITAN WAKES.', '— HOLD THE LINE —'], 'titan', false),
+      makeLoreBeat(['TWELVE MINUTES UNTIL', 'THE TITAN WAKES.', '— HOLD THE LINE —'], 'titan', false),
     ];
   } else {
     beats = [
@@ -2265,6 +2765,12 @@ function startGame() {
   world.gasPuddles = [];
   world.spits = [];
   world.beams = [];
+  world.spores = [];
+  world.glues = [];
+  world.bossBombs = [];
+  world.splashes = [];
+  world.flames = [];
+  world.bananas = [];
   world.bossWarning = null;
   world.nextBossAt = BOSS_INTERVAL;
   world.titanSpawned = false;
@@ -2301,6 +2807,8 @@ function startGame() {
   world.gameOver = false;
   world.clickMarker = null;
   world.tier2Unlocked = false;
+  // Pick the selected map (falls back to forest if unset/unknown).
+  world.map = MAPS[selectedMap] ? selectedMap : 'forest';
   // Speedrun wave-mode reset.
   world.waveMode = !!selectedSpeedrun;
   world.wave = 0;

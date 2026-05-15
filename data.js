@@ -10,8 +10,10 @@ const BRUTE_UNLOCK_T = 60;
 const ELITE_UNLOCK_T = 180;
 const SPITTER_UNLOCK_T = 300;   // 5 min — rare ranged enemy
 const EXPLODER_UNLOCK_T = 360;  // 6 min — rare suicide bomber
+const BLOOMLING_UNLOCK_T = 120; // 2 min — fast spore-burster
+const SLINGER_UNLOCK_T  = 540;  // 9 min — tanky green-glue shooter
 const LATE_GAME_T = 360;        // 6 min — HP/dmg scaling kicks in (player power outpaces sooner)
-const VICTORY_TIME = 900;       // 15 min — Titan spawns
+const VICTORY_TIME = 720;       // 12 min — Titan spawns
 const BOSS_INTERVAL = 60;       // boss every minute
 const EPIC_CHANCE = 0.10;       // 10% chance each upgrade card rolls as epic
 
@@ -43,6 +45,14 @@ const WEAPONS = {
   hole: {
     name: 'HOLE', iconId: 'hole_unlock', tier: 2,
     upgradeIds: ['hole_dmg', 'hole_radius', 'hole_rate'],
+  },
+  flame: {
+    name: 'FLAMETHROWER', iconId: 'flame_unlock', tier: 2,
+    upgradeIds: ['flame_dmg', 'flame_rate', 'flame_range', 'flame_width'],
+  },
+  banana: {
+    name: 'BANANA', iconId: 'banana_unlock', tier: 2,
+    upgradeIds: ['banana_dmg', 'banana_count', 'banana_rate', 'banana_speed'],
   },
 };
 
@@ -86,7 +96,7 @@ const UPGRADES = [
   { id: 'shards_dmg',   weaponId: 'shards', name: 'KEEN GLASS',  desc: '+30% shard damage',
     max: 5, apply: p => { p.weapons.shards.dmg *= 1.3; p.weapons.shards.fragmentDmg *= 1.3; } },
   { id: 'shards_count', weaponId: 'shards', name: 'EXTRA SHARD', desc: '+1 orbiting shard',
-    max: 1, apply: p => p.weapons.shards.count += 1 },
+    max: 3, apply: p => p.weapons.shards.count += 1 },
   { id: 'shards_rate',  weaponId: 'shards', name: 'SHATTER FAST', desc: '+25% re-summon rate',
     max: 4, apply: p => p.weapons.shards.rate *= 0.8 },
   // HOLE
@@ -96,13 +106,31 @@ const UPGRADES = [
     max: 4, apply: p => p.weapons.hole.radius *= 1.2 },
   { id: 'hole_rate',   weaponId: 'hole', name: 'COLLAPSE FAST', desc: '+25% drop rate',
     max: 4, apply: p => p.weapons.hole.rate *= 0.8 },
+  // FLAMETHROWER
+  { id: 'flame_dmg',   weaponId: 'flame', name: 'HOTTER FLAME', desc: '+30% flame damage',
+    max: 5, apply: p => p.weapons.flame.dmg *= 1.3 },
+  { id: 'flame_rate',  weaponId: 'flame', name: 'PILOT LIGHT',  desc: '+20% flame rate',
+    max: 4, apply: p => p.weapons.flame.rate *= 0.83 },
+  { id: 'flame_range', weaponId: 'flame', name: 'PRESSURIZED',  desc: '+25% flame range',
+    max: 4, apply: p => p.weapons.flame.range *= 1.25 },
+  { id: 'flame_width', weaponId: 'flame', name: 'WIDE NOZZLE',  desc: '+25% cone width',
+    max: 3, apply: p => p.weapons.flame.halfAngle *= 1.25 },
+  // BANANA
+  { id: 'banana_dmg',   weaponId: 'banana', name: 'RIPE BANANA',  desc: '+30% banana damage',
+    max: 5, apply: p => p.weapons.banana.dmg *= 1.3 },
+  { id: 'banana_count', weaponId: 'banana', name: 'EXTRA BANANA', desc: '+1 banana per throw',
+    max: 3, apply: p => p.weapons.banana.count += 1 },
+  { id: 'banana_rate',  weaponId: 'banana', name: 'PEELED FAST',  desc: '+20% throw rate',
+    max: 4, apply: p => p.weapons.banana.rate *= 0.83 },
+  { id: 'banana_speed', weaponId: 'banana', name: 'SLICK CURVE',  desc: '+20% banana speed',
+    max: 4, apply: p => p.weapons.banana.speed *= 1.2 },
   // PASSIVES
   { id: 'speed',  weaponId: null, name: 'SWIFT FEET', desc: '+10% move speed',
     max: 5, apply: p => p.mods.speedMult *= 1.1 },
-  { id: 'hp',     weaponId: null, name: 'TOUGH SKIN', desc: '+25 max HP & heal',
-    max: 5, apply: p => { p.hpMax += 25; p.hp = Math.min(p.hpMax, p.hp + 25); } },
-  { id: 'lifesteal', weaponId: null, name: 'LIFESTEAL', desc: '+0.2% damage healed',
-    max: 4, apply: p => p.mods.lifestealPct += 0.002 },
+  { id: 'hp',     weaponId: null, name: 'TOUGH SKIN', desc: '+25 max HP & full heal',
+    max: 5, apply: p => { p.hpMax += 25; p.hp = p.hpMax; } },
+  { id: 'lifesteal', weaponId: null, name: 'LIFESTEAL', desc: '+0.1% damage healed',
+    max: 4, apply: p => p.mods.lifestealPct += 0.001 },
   { id: 'xp_boost', weaponId: null, name: 'QUICK LEARNER', desc: '+20% XP gain',
     max: 5, apply: p => p.mods.xpBoost += 0.20 },
   { id: 'magnet', weaponId: null, name: 'MAGNETISM', desc: '+30% pickup radius',
@@ -113,24 +141,26 @@ const UPGRADES = [
 
 const SUPERS = [
   { id: 'super_blade', weaponId: 'knife', name: 'BLADE STORM',
-    desc: '+3 knives, 2× speed, 2× damage, +2 pierce',
+    desc: 'Fires in all directions, +3 knives, 1.5× speed, 1.5× damage',
     iconKind: 'super_blade',
     requires: [{ id: 'knife_dmg', level: 3 }, { id: 'knife_count', level: 2 }, { id: 'speed', level: 2 }],
     apply: (p) => {
-      p.weapons.knife.count += 3; p.weapons.knife.rate *= 0.5;
-      p.weapons.knife.dmg *= 2; p.weapons.knife.pierce += 2;
+      p.weapons.knife.allDirections = true;
+      p.weapons.knife.count += 3;
+      p.weapons.knife.speed *= 1.5;
+      p.weapons.knife.dmg *= 1.5;
     },
   },
   { id: 'super_aura', weaponId: 'aura', name: 'OBLIVION',
-    desc: '60% bigger, 2.5× damage, faster ticks',
+    desc: '60% bigger, 2× damage, faster ticks',
     iconKind: 'super_aura',
     requires: [{ id: 'aura_dmg', level: 2 }, { id: 'area', level: 1 }, { id: 'dmg', level: 2 }],
     apply: (p) => {
-      p.weapons.aura.radius *= 1.6; p.weapons.aura.dmg *= 2.5; p.weapons.aura.rate *= 0.6;
+      p.weapons.aura.radius *= 1.6; p.weapons.aura.dmg *= 2; p.weapons.aura.rate *= 0.6;
     },
   },
   { id: 'super_holy', weaponId: 'holy', name: 'DELUGE',
-    desc: '+2 bottles, bigger puddles, longer DoT, stronger heal',
+    desc: '+2 bottles, bigger puddles, longer DoT — potions drop near you',
     iconKind: 'super_holy',
     requires: [{ id: 'holy_dmg', level: 2 }, { id: 'holy_count', level: 1 }, { id: 'magnet', level: 1 }],
     apply: (p) => {
@@ -138,24 +168,25 @@ const SUPERS = [
       p.weapons.holy.puddleRadius *= 1.5;
       p.weapons.holy.duration += 2;
       p.weapons.holy.dmg *= 1.5;
-      p.weapons.holy.healPerTick *= 2;
+      // Periodic potion drop near the player while the super is active.
+      p.weapons.holy.potion = { cd: 10, interval: 10 };
     },
   },
   { id: 'super_ice', weaponId: 'ice', name: 'BLIZZARD',
-    desc: 'Every 20s, freeze every enemy on screen — 50% slow for 3s',
+    desc: 'Every 15s, freeze every enemy on screen — 50% slow for 3s',
     iconKind: 'super_ice',
     requires: [{ id: 'ice_dmg', level: 2 }, { id: 'ice_slow', level: 1 }, { id: 'magnet', level: 1 }],
     apply: (p) => {
-      p.weapons.ice.blizzard = { cd: 20, interval: 20, slowMult: 0.5, duration: 3 };
+      p.weapons.ice.blizzard = { cd: 15, interval: 15, slowMult: 0.5, duration: 3 };
     },
   },
   { id: 'super_lightning', weaponId: 'lightning', name: 'THUNDERSTORM',
-    desc: '+3 chains, 2× damage, faster strikes',
+    desc: '+3 chains, 1.5× damage, faster strikes',
     iconKind: 'super_lightning',
     requires: [{ id: 'lightning_dmg', level: 2 }, { id: 'lightning_chain', level: 1 }, { id: 'speed', level: 1 }],
     apply: (p) => {
       p.weapons.lightning.chains += 3;
-      p.weapons.lightning.dmg *= 2;
+      p.weapons.lightning.dmg *= 1.5;
       p.weapons.lightning.rate *= 0.6;
     },
   },
@@ -179,6 +210,26 @@ const SUPERS = [
       p.weapons.hole.dmg *= 2;
       p.weapons.hole.rate *= 0.6;
       p.weapons.hole.pullForce *= 1.4;
+    },
+  },
+  { id: 'super_flame', weaponId: 'flame', name: 'INFERNO',
+    desc: 'Sprays fire in all 4 directions, 1.5× damage, wider',
+    iconKind: 'super_flame',
+    requires: [{ id: 'flame_dmg', level: 2 }, { id: 'flame_range', level: 1 }, { id: 'dmg', level: 1 }],
+    apply: (p) => {
+      p.weapons.flame.fourWay = true;
+      p.weapons.flame.dmg *= 1.5;
+      p.weapons.flame.halfAngle *= 1.2;
+    },
+  },
+  { id: 'super_banana', weaponId: 'banana', name: 'POTASSIUM BLAST',
+    desc: '1.25× damage, +1 banana, splash damage on each hit',
+    iconKind: 'super_banana',
+    requires: [{ id: 'banana_dmg', level: 2 }, { id: 'banana_count', level: 1 }, { id: 'speed', level: 1 }],
+    apply: (p) => {
+      p.weapons.banana.dmg *= 1.25;
+      p.weapons.banana.count += 1;
+      p.weapons.banana.splash = true;
     },
   },
 ];
@@ -227,12 +278,19 @@ const BOSS_TYPES = [
     ability: 'gas', abilityCd: 4,
     desc: 'LEAVES POISON GAS PUDDLES',
   },
+  {
+    id: 'stephen', name: 'STEPHEN',
+    w: 32, h: 40, baseHp: 2200, baseDmg: 40, speed: 34,
+    color: '#ff8a1a', accent: '#5a2a08', eyes: '#fff066',
+    ability: 'stephen', abilityCd: 3.2,
+    desc: 'HURLS BOMBS — QUAKES SLOW EVERYONE',
+  },
 ];
 
 // The 15-minute final boss — game ends only when he dies.
 const TITAN_TYPE = {
   id: 'titan', name: 'THE TITAN',
-  w: 56, h: 72, baseHp: 28000, baseDmg: 60, speed: 12,
+  w: 56, h: 72, baseHp: 32000, baseDmg: 60, speed: 12,
   color: '#7a2a14', accent: '#3a1408', eyes: '#ffcc44',
   ability: 'titan', abilityCd: 4,
   desc: 'BEAMS, SLAMS, AND SUMMONS BETWEEN PHASES',

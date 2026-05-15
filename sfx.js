@@ -126,4 +126,6 @@ const SFX = {
   gas()        { if (!this._gate('gas', 0.10)) return; this.noise({ dur: 0.25, vol: 0.10, lp: 2200, hp: 200 }); },
   titanRoar()  { this.arpeggio([60, 50, 40], 0.15, { type: 'sawtooth', vol: 0.34, dur: 0.4 }); this.noise({ dur: 0.9, vol: 0.18, lp: 400, hp: 40, rampLp: 60 }); },
   titanBeam()  { this.noise({ dur: 0.55, vol: 0.20, lp: 5000, hp: 800, rampLp: 1200 }); this.tone({ freq: 600, freq2: 1800, dur: 0.5, type: 'sawtooth', vol: 0.12 }); },
+  flame()      { if (!this._gate('flame', 0.30)) return; this.noise({ dur: 0.50, vol: 0.16, lp: 3000, hp: 200, rampLp: 600 }); this.tone({ freq: 320, freq2: 120, dur: 0.45, type: 'sawtooth', vol: 0.08 }); },
+  banana()     { if (!this._gate('banana', 0.06)) return; this.tone({ freq: 620, freq2: 360, dur: 0.12, type: 'triangle', vol: 0.10 }); },
 };

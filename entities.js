@@ -10,12 +10,22 @@
 function initWeapon(p, id) {
   switch (id) {
     case 'knife':     p.weapons.knife     = { cd: 0, rate: 0.6, dmg: 18, speed: 240, count: 1, pierce: 1 }; break;
-    case 'aura':      p.weapons.aura      = { cd: 0, rate: 0.35, dmg: 14, radius: 31 }; break;
-    case 'holy':      p.weapons.holy      = { cd: 0, rate: 1.6, dmg: 8, count: 1, duration: 3.0, puddleRadius: 29, healPerTick: 2 }; break;
+    case 'aura':      p.weapons.aura      = { cd: 0, rate: 0.5, dmg: 14, radius: 31 }; break;
+    case 'holy':      p.weapons.holy      = { cd: 0, rate: 1.6, dmg: 8, count: 1, duration: 3.0, puddleRadius: 29, healPerTick: 1 }; break;
     case 'ice':       p.weapons.ice       = { cd: 0, rate: 0.45, dmg: 10, speed: 280, slow: 1.4, count: 1 }; break;
     case 'lightning': p.weapons.lightning = { cd: 0, rate: 1.0, dmg: 22, chains: 2, range: 200 }; break;
     case 'shards':    p.weapons.shards    = { cd: 0, rate: 4.0, dmg: 14, count: 3, fragments: 4, life: 7.0, orbitRadius: 32, fragmentDmg: 7 }; break;
-    case 'hole':      p.weapons.hole      = { cd: 0, rate: 6.0, dmg: 60, radius: 36, duration: 2.0, pullForce: 90 }; break;
+    case 'hole':      p.weapons.hole      = { cd: 0, rate: 6.0, dmg: 60, radius: 44, duration: 2.0, pullForce: 90 }; break;
+    case 'flame':     p.weapons.flame     = {
+      cd: 0, rate: 2.2, dmg: 8, range: 70, halfAngle: 0.42,
+      duration: 0.55, dmgInterval: 0.12,
+      fourWay: false,
+    }; break;
+    case 'banana':    p.weapons.banana    = {
+      cd: 0, rate: 1.3, dmg: 22, count: 1,
+      range: 130, speed: 320,
+      splash: false, splashRadius: 28,
+    }; break;
   }
 }
 
@@ -85,6 +95,28 @@ function createPlayer(opts = {}) {
   return p;
 }
 
+// Maps a weapon slot id to the super-power id that upgrades it. When that
+// super is unlocked, the weapon's visuals switch to an orange "ignited" palette.
+const SUPER_BY_WEAPON = {
+  knife: 'super_blade', aura: 'super_aura', holy: 'super_holy',
+  ice: 'super_ice', lightning: 'super_lightning', shards: 'super_shards',
+  hole: 'super_hole', flame: 'super_flame', banana: 'super_banana',
+};
+function weaponIsSuper(p, weaponId) {
+  if (!p || !p.superUnlocked || !weaponId) return false;
+  const sid = SUPER_BY_WEAPON[weaponId];
+  return sid ? !!p.superUnlocked[sid] : false;
+}
+
+// Compounding ice slow. Each consecutive ice hit while still slowed deepens
+// the multiplier through three stages (0.45 → 0.30 → 0.15). Stacks reset once
+// the slow expires.
+function enemySlowFactor(e) {
+  if (!e || e.slowedUntil <= world.time) return 1.0;
+  const s = e.iceStacks || 1;
+  return s >= 3 ? 0.15 : s >= 2 ? 0.30 : 0.45;
+}
+
 function alivePlayers() {
   return world.players.filter(p => p && !p.dead);
 }
@@ -108,7 +140,12 @@ function nearestPlayer(x, y) {
 function lateGameHpMult() {
   const t = world.time;
   if (t < LATE_GAME_T) return 1;
-  return 1 + ((t - LATE_GAME_T) / 60) * 0.55;
+  const over = t - LATE_GAME_T;
+  // First 3 min past the threshold (6→9 min) is the gentle 0.55/min ramp.
+  // After 9 min, slope accelerates to 0.95/min so endgame enemies actually
+  // soak hits from maxed weapons instead of evaporating.
+  if (over <= 180) return 1 + (over / 60) * 0.55;
+  return 1 + 3 * 0.55 + ((over - 180) / 60) * 0.95;
 }
 function lateGameDmgMult() {
   const t = world.time;
@@ -145,7 +182,11 @@ function spawnEnemy() {
   // time rather than the real clock, so wave 5 plays like minute ~2:15 etc.
   const t = world.waveSpawnTime != null ? world.waveSpawnTime : world.time;
   const mHp = world.waveSpawnTime != null
-    ? (1 + Math.max(0, (world.waveSpawnTime - LATE_GAME_T) / 60) * 0.55)
+    ? (() => {
+        const over = Math.max(0, world.waveSpawnTime - LATE_GAME_T);
+        if (over <= 180) return 1 + (over / 60) * 0.55;
+        return 1 + 3 * 0.55 + ((over - 180) / 60) * 0.95;
+      })()
     : lateGameHpMult();
   const mDmg = world.waveSpawnTime != null
     ? (1 + Math.max(0, (world.waveSpawnTime - LATE_GAME_T) / 60) * 0.10)
@@ -178,8 +219,30 @@ function spawnEnemy() {
   const spitterChance  = t > SPITTER_UNLOCK_T  ? 0.040 : 0;
   const bruteChance    = t > BRUTE_UNLOCK_T    ? 0.140 : 0;
 
+  const bloomChance = t > BLOOMLING_UNLOCK_T ? 0.08 : 0;
+  const slingerChance = t > SLINGER_UNLOCK_T ? 0.07 : 0;
+
   let acc = 0;
-  if (r < (acc += eliteChance)) {
+  if (r < (acc += slingerChance)) {
+    const hp = 220 * mHp * coopMult * speedrunHp;
+    world.enemies.push({
+      type: 'slinger', x, y, vx: 0, vy: 0, w: 16, h: 18,
+      hp, hpMax: hp, speed: (38 + Math.random() * 6) * mSpd,
+      dmg: 14 * mDmg * coopMult,
+      sprites: slingerSprites, animT: Math.random() * 10,
+      hit: 0, slowedUntil: 0,
+      slingCd: 1.4 + Math.random() * 0.6,
+    });
+  } else if (r < (acc += bloomChance)) {
+    const hp = 14 * mHp * coopMult * speedrunHp;
+    world.enemies.push({
+      type: 'bloomling', x, y, vx: 0, vy: 0, w: 14, h: 16,
+      hp, hpMax: hp, speed: (78 + Math.random() * 16) * mSpd,
+      dmg: 10 * mDmg * coopMult,
+      sprites: bloomlingSprites, animT: Math.random() * 10,
+      hit: 0, slowedUntil: 0,
+    });
+  } else if (r < (acc += eliteChance)) {
     const hp = 420 * mHp * coopMult * speedrunHp;
     world.enemies.push({
       type: 'elite', x, y, vx: 0, vy: 0, w: 24, h: 26,
@@ -268,7 +331,11 @@ function spawnBoss() {
   const type = pool[irand(0, pool.length - 1)];
   history.push(type.id);
   if (history.length > 4) history.shift();
-  const minute = Math.max(1, Math.floor(world.time / 60));
+  // In wave mode, the speedrun clock isn't a good proxy for difficulty — a
+  // player can blast through 8 waves in 90s but the boss should still feel
+  // like the corresponding mid-game boss. Map off the wave's natural time.
+  const sourceT = world.waveSpawnTime != null ? world.waveSpawnTime : world.time;
+  const minute = Math.max(1, Math.floor(sourceT / 60));
   const hpMult = 1 + (minute - 1) * 0.35;
   // Boss per-minute damage slope softened from 0.20 → 0.10 and the late-game
   // damage multiplier is now the gentle one — past minute 10 the stacked
@@ -318,6 +385,7 @@ function spawnTitan() {
   for (const e of world.enemies) e.dead = true;
   world.enemies = [];
   world.thorns = []; world.shockwaves = []; world.gasPuddles = []; world.spits = [];
+  world.spores = []; world.glues = []; world.bossBombs = [];
   const anchor = alivePlayers()[0] || world.player;
   if (!anchor) return;
   const ang = Math.random() * TAU;
@@ -362,6 +430,24 @@ function spawnTitan() {
 function tickBossAbility(e, dt) {
   const ab = e.bossType.ability;
   if (!ab) return;
+  // Titan enrage at ≤20% HP — one-shot transition: faster, faster abilities, red.
+  if (e.isTitan && !e.enraged && e.hp <= e.hpMax * 0.2) {
+    e.enraged = true;
+    e.speed *= 1.5;
+    e.abilityCdMax = TITAN_TYPE.abilityCd / 1.5;
+    if (e.abilityCd > e.abilityCdMax) e.abilityCd = e.abilityCdMax;
+    world.flash = Math.max(world.flash, 0.6);
+    world.camera.shake = Math.max(world.camera.shake, 14);
+    SFX.titanRoar();
+  }
+  // Stephen quakes on its own timer, independent of the bomb-throw cycle.
+  if (e.bossType.id === 'stephen') {
+    e.quakeCd = (e.quakeCd == null ? 2.5 : e.quakeCd) - dt;
+    if (e.quakeCd <= 0) {
+      e.quakeCd = 3.2;
+      triggerStephenQuake(e);
+    }
+  }
   e.abilityCd -= dt;
   if (e.abilityCd > 0) return;
   e.abilityCd = e.abilityCdMax;
@@ -437,6 +523,27 @@ function tickBossAbility(e, dt) {
         dmg: e.dmg * 0.15, dmgInterval: 0.4, dmgTimer: 0,
       });
     }
+  } else if (ab === 'stephen') {
+    // Lobs 2–3 bombs toward each player. Each bomb arcs, lands, explodes for
+    // area damage. Direct hit deals e.dmg.
+    SFX.bomb();
+    const targets = alivePlayers();
+    if (targets.length === 0) return;
+    const perTarget = 2 + Math.floor(e.minute / 4);
+    for (const tgt of targets) {
+      for (let i = 0; i < perTarget; i++) {
+        const tx = tgt.x + rand(-30, 30);
+        const ty = tgt.y + rand(-30, 30);
+        world.bossBombs.push({
+          x: e.x, y: e.y, sx: e.x, sy: e.y,
+          tx, ty,
+          t: 0, dur: 0.85,
+          dmg: e.dmg * 0.7,
+          explodeR: 40,
+          owner: e,
+        });
+      }
+    }
   } else if (ab === 'titan') {
     // Cycle through 4 attacks for varied pressure.
     e.phase = (e.phase + 1) % 4;
@@ -453,8 +560,9 @@ function tickBossAbility(e, dt) {
       const mDmg = lateGameDmgMult();
       const speedrunHp = world.waveMode ? 0.75 : 1.0;
       const tgt = nearestPlayer(e.x, e.y) || e;
-      for (let i = 0; i < 10; i++) {
-        const a = (i / 10) * TAU;
+      const zCount = e.enraged ? 30 : 20;
+      for (let i = 0; i < zCount; i++) {
+        const a = (i / zCount) * TAU;
         const hp = 36 * mHp * speedrunHp;
         const tier = irand(0, zombieSets.length - 1);
         world.enemies.push({
@@ -477,7 +585,8 @@ function tickBossAbility(e, dt) {
       });
     } else {
       SFX.swarm();
-      for (let i = 0; i < 24; i++) {
+      const sCount = e.enraged ? 72 : 48;
+      for (let i = 0; i < sCount; i++) {
         const a = Math.random() * TAU;
         const r = 16 + Math.random() * 26;
         spawnSwarmling(e.x + Math.cos(a) * r, e.y + Math.sin(a) * r);
@@ -486,11 +595,34 @@ function tickBossAbility(e, dt) {
   }
 }
 
+function triggerStephenQuake(e) {
+  // Screen shake + apply slow to every alive player. No direct damage — it's a
+  // movement-and-vision pressure ability that combos with the bomb throws.
+  world.camera.shake = Math.max(world.camera.shake, 14);
+  world.flash = Math.max(world.flash, 0.3);
+  for (const pl of world.players) {
+    if (!pl || pl.dead) continue;
+    pl.slowedUntil = Math.max(pl.slowedUntil, world.time + 1.4);
+  }
+  SFX.bossSlam();
+  // Visual: dust kicked up around the boss as the floor rumbles.
+  for (let i = 0; i < 24; i++) {
+    const a = Math.random() * TAU;
+    const r = 18 + Math.random() * 26;
+    world.particles.push({
+      x: e.x + Math.cos(a) * r, y: e.y + Math.sin(a) * r,
+      vx: Math.cos(a) * 30, vy: -20 - Math.random() * 30,
+      life: 0.6, maxLife: 0.6, size: 2,
+      color: ['#aa6633', '#ffaa44', '#5a3a18'][irand(0, 2)], gravity: 80,
+    });
+  }
+}
+
 // ---------- ENEMY AI OVERRIDES (called from update loop) ----------
 function tickSpitterAI(e, dt, tgt) {
   const dx = tgt.x - e.x, dy = tgt.y - e.y;
   const d = Math.hypot(dx, dy) || 1;
-  const slowFactor = (e.slowedUntil > world.time) ? 0.45 : 1.0;
+  const slowFactor = enemySlowFactor(e);
   if (d > e.keepDist + 30) {
     e.vx = (dx / d) * e.speed * slowFactor;
     e.vy = (dy / d) * e.speed * slowFactor;
@@ -513,10 +645,48 @@ function tickSpitterAI(e, dt, tgt) {
   }
 }
 
+function tickSlingerAI(e, dt, tgt) {
+  // Tanky and aggressive — always runs toward the player. Shoots a fast green
+  // glue glob on a tight cooldown.
+  const dx = tgt.x - e.x, dy = tgt.y - e.y;
+  const d = Math.hypot(dx, dy) || 1;
+  const slowFactor = enemySlowFactor(e);
+  e.vx = (dx / d) * e.speed * slowFactor;
+  e.vy = (dy / d) * e.speed * slowFactor;
+  e.slingCd -= dt;
+  if (e.slingCd <= 0 && d < 320) {
+    e.slingCd = 1.4 + Math.random() * 0.4;
+    const speed = 260;
+    const ang = Math.atan2(dy, dx);
+    world.glues.push({
+      x: e.x, y: e.y,
+      vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
+      life: 1.6, dmg: e.dmg, owner: e,
+    });
+    SFX.spit();
+  }
+}
+
+function bloomlingDeath(e) {
+  // Three short-range spore hazards that linger and damage on contact.
+  for (let i = 0; i < 3; i++) {
+    const ang = (i / 3) * TAU + Math.random() * 0.5;
+    const r = 14 + Math.random() * 8;
+    world.spores.push({
+      x: e.x + Math.cos(ang) * r,
+      y: e.y + Math.sin(ang) * r,
+      r: 9, life: 4.0, maxLife: 4.0,
+      dmg: e.dmg * 0.6, dmgInterval: 0.5, dmgTimer: 0,
+      bob: Math.random() * TAU,
+    });
+  }
+  spawnParticles(e.x, e.y, 18, { colors: ['#ff66aa', '#aaff66', '#ffaadd'], speed: 90, life: 0.5, gravity: 0 });
+}
+
 function tickExploderAI(e, dt, tgt) {
   const dx = tgt.x - e.x, dy = tgt.y - e.y;
   const d = Math.hypot(dx, dy) || 1;
-  const slowFactor = (e.slowedUntil > world.time) ? 0.45 : 1.0;
+  const slowFactor = enemySlowFactor(e);
   e.vx = (dx / d) * e.speed * slowFactor;
   e.vy = (dy / d) * e.speed * slowFactor;
   if (d < 24 || e.fuseT > 0) {
@@ -598,6 +768,8 @@ function killEnemy(e) {
   }
   // Exploder detonates on death too.
   if (e.type === 'exploder') exploderDetonate(e);
+  // Bloomling bursts into 3 spore puffs.
+  if (e.type === 'bloomling') bloomlingDeath(e);
 
   let gemTier = 0;
   if (e.isBoss) gemTier = 2;
@@ -636,7 +808,7 @@ function killEnemy(e) {
         }
         SFX.swarm();
       }
-      const chestCount = Math.max(1, e.minute);
+      const chestCount = Math.min(3, Math.max(1, e.minute));
       for (let i = 0; i < chestCount; i++) {
         const ang = (i / chestCount) * TAU + Math.random() * 0.4;
         const r = chestCount === 1 ? 0 : 16 + i * 2;

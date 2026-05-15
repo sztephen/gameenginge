@@ -295,10 +295,72 @@ function makeBehemoth() {
   }));
 }
 
+// BLOOMLING — fast, fragile pink/green spore zombie. Head sprouts a flower bud.
+function makeBloomling() {
+  const p = { skin:'#b07acc', skin2:'#cc99e0', dark:'#3a1a4a', petal:'#ff66aa', petal2:'#ffaadd', leaf:'#88dd66', stem:'#3a8a3a', eye:'#aaff66' };
+  return [0, 1].map(f => makeSprite(14, 16, (x) => {
+    _zombieShadow(x);
+    // Flower bud on top — petals + glowing core.
+    x.fillStyle = p.petal;  x.fillRect(5, 0, 4, 2);
+    x.fillStyle = p.petal2; x.fillRect(6, 0, 2, 1);
+    x.fillStyle = p.stem;   x.fillRect(6, 1, 2, 1);
+    // Head.
+    x.fillStyle = p.skin;   x.fillRect(4, 2, 6, 5);
+    x.fillStyle = p.dark;   x.fillRect(4, 6, 6, 1);
+    x.fillStyle = p.skin2;  x.fillRect(5, 3, 1, 1); x.fillRect(8, 3, 1, 1);
+    // Glowing green eyes.
+    x.fillStyle = p.eye;    x.fillRect(5, 4, 1, 1); x.fillRect(8, 4, 1, 1);
+    x.fillStyle = '#220033'; x.fillRect(6, 5, 2, 1);
+    // Body — covered in mossy patches.
+    x.fillStyle = p.skin;   x.fillRect(3, 7, 8, 5);
+    x.fillStyle = p.leaf;   x.fillRect(4, 8, 2, 2); x.fillRect(8, 9, 2, 2);
+    x.fillStyle = p.petal;  x.fillRect(6, 9, 2, 1);
+    // Thin arms (fast & light).
+    x.fillStyle = p.skin;   x.fillRect(2, 7 + f, 1, 4);
+    x.fillStyle = p.skin;   x.fillRect(11, 7 - f, 1, 4);
+    _zombieFeet(x, p, f);
+  }));
+}
+
+// SLINGER — tanky late-game ranged zombie. Slingshot strap across chest, dark
+// hood, green bile sac on the back/shoulder.
+function makeSlinger() {
+  const p = { skin:'#557a55', skin2:'#779977', dark:'#1a2a1a', cloth:'#2a1820', cloth2:'#4a2840', strap:'#5a3a1a', stoneA:'#88cc44', stoneB:'#aaff66', eye:'#ff6600', hood:'#1a0a2a' };
+  return [0, 1].map(f => makeSprite(16, 18, (x) => {
+    x.fillStyle = 'rgba(0,0,0,0.55)';
+    x.beginPath(); x.ellipse(8, 17, 5, 1, 0, 0, TAU); x.fill();
+    // Hood / head.
+    x.fillStyle = p.hood;   x.fillRect(4, 1, 8, 4);
+    x.fillStyle = p.dark;   x.fillRect(4, 5, 8, 1);
+    x.fillStyle = p.skin;   x.fillRect(5, 3, 6, 5);
+    x.fillStyle = p.dark;   x.fillRect(5, 7, 6, 1);
+    x.fillStyle = p.eye;    x.fillRect(6, 5, 1, 1); x.fillRect(9, 5, 1, 1);
+    x.fillStyle = '#220000'; x.fillRect(7, 6, 2, 1);
+    // Body — heavy robe.
+    x.fillStyle = p.cloth;  x.fillRect(2, 8, 12, 7);
+    x.fillStyle = p.cloth2; x.fillRect(2, 8, 12, 1);
+    // Slingshot strap diagonal across chest.
+    x.fillStyle = p.strap;
+    for (let i = 0; i < 10; i++) x.fillRect(3 + i, 8 + Math.floor(i / 2), 1, 1);
+    // Bile sac on shoulder.
+    x.fillStyle = p.stoneA; x.fillRect(11, 8, 3, 3);
+    x.fillStyle = p.stoneB; x.fillRect(11, 8, 2, 1);
+    x.fillStyle = p.dark;   x.fillRect(13, 10, 1, 1);
+    // Arms (thick).
+    x.fillStyle = p.skin;   x.fillRect(0, 9 + f, 2, 4);
+    x.fillStyle = p.skin;   x.fillRect(14, 9 - f, 2, 4);
+    // Feet.
+    x.fillStyle = p.dark;   x.fillRect(4, 15, 3, 2 + f);
+    x.fillStyle = p.dark;   x.fillRect(9, 15, 3, 2 - f);
+  }));
+}
+
 const zombieSets = [makeShambler(), makeRotter(), makeGhoul()];
 const spitterSprites  = makeSpitter();
 const exploderSprites = makeExploder();
 const behemothSprites = makeBehemoth();
+const bloomlingSprites = makeBloomling();
+const slingerSprites = makeSlinger();
 
 const bruteSprites = (() => {
   const out = [];
@@ -493,6 +555,31 @@ const iceShardSprite = makeSprite(8, 10, (x) => {
   x.fillRect(3, 1, 1, 2);
 });
 
+// Banana boomerang — yellow crescent with a brown stem.
+const bananaSprite = makeSprite(10, 8, (x) => {
+  // Outline crescent.
+  x.fillStyle = '#8a6a10';
+  x.fillRect(2, 1, 6, 1);
+  x.fillRect(1, 2, 2, 1);
+  x.fillRect(7, 2, 2, 1);
+  x.fillRect(0, 3, 2, 2);
+  x.fillRect(8, 3, 2, 2);
+  x.fillRect(1, 5, 2, 1);
+  x.fillRect(7, 5, 2, 1);
+  x.fillRect(2, 6, 6, 1);
+  // Yellow body.
+  x.fillStyle = '#ffcc44';
+  x.fillRect(3, 2, 4, 1);
+  x.fillRect(2, 3, 6, 2);
+  x.fillRect(3, 5, 4, 1);
+  // Bright highlight.
+  x.fillStyle = '#ffe088';
+  x.fillRect(3, 3, 4, 1);
+  // Brown stem.
+  x.fillStyle = '#5a3a18';
+  x.fillRect(8, 0, 1, 2);
+});
+
 // Lightning bolt sprite
 const lightningSprite = makeSprite(6, 12, (x) => {
   x.fillStyle = '#ffee66';
@@ -550,6 +637,142 @@ const tile3 = makeSprite(32, 32, (x) => {
     x.fillRect(irand(0,30), irand(0,30), 2, 1);
   }
 });
+
+// ===== ARCTIC TILES =====
+// Pale icy ground — flat snow base with crystal speckle. The accent variant
+// gets a cracked frost pattern; the rare variant gets a small ice shard cluster.
+const arcticTile = makeSprite(32, 32, (x) => {
+  x.fillStyle = '#cfe4f0'; x.fillRect(0, 0, 32, 32);
+  for (let i = 0; i < 70; i++) {
+    x.fillStyle = ['#e8f4ff','#b8d4e4','#dceaf4','#a0c0d4'][irand(0,3)];
+    x.fillRect(irand(0,31), irand(0,31), 1, 1);
+  }
+  for (let i = 0; i < 5; i++) {
+    x.fillStyle = '#ffffff';
+    x.fillRect(irand(2,29), irand(2,29), 1, 1);
+  }
+  if (Math.random() < 0.35) {
+    x.fillStyle = '#88aac4';
+    const sx = irand(6, 24), sy = irand(6, 24);
+    x.fillRect(sx, sy, 3, 1);
+    x.fillRect(sx + 1, sy + 1, 1, 1);
+  }
+});
+const arcticTile2 = makeSprite(32, 32, (x) => {
+  x.fillStyle = '#b8d4e4'; x.fillRect(0, 0, 32, 32);
+  for (let i = 0; i < 70; i++) {
+    x.fillStyle = ['#a0c0d4','#cfe4f0','#9ab4c8','#e8f4ff'][irand(0,3)];
+    x.fillRect(irand(0,31), irand(0,31), 1, 1);
+  }
+  // Cracked frost lines.
+  x.fillStyle = '#88aac4';
+  for (let i = 0; i < 3; i++) {
+    const sx = irand(4, 26), sy = irand(4, 26);
+    const len = irand(4, 8);
+    const horiz = Math.random() < 0.5;
+    for (let j = 0; j < len; j++) {
+      if (horiz) x.fillRect(sx + j, sy + (j & 1), 1, 1);
+      else       x.fillRect(sx + (j & 1), sy + j, 1, 1);
+    }
+  }
+});
+const arcticTile3 = makeSprite(32, 32, (x) => {
+  x.fillStyle = '#9ab4c8'; x.fillRect(0, 0, 32, 32);
+  for (let i = 0; i < 60; i++) {
+    x.fillStyle = ['#b8d4e4','#7090a4','#cfe4f0'][irand(0,2)];
+    x.fillRect(irand(0,31), irand(0,31), 1, 1);
+  }
+  // Small ice shard cluster.
+  const cx0 = irand(10, 22), cy0 = irand(10, 22);
+  x.fillStyle = '#aaddff';
+  x.fillRect(cx0, cy0 - 3, 1, 5);
+  x.fillRect(cx0 + 2, cy0 - 2, 1, 4);
+  x.fillRect(cx0 - 2, cy0 - 1, 1, 3);
+  x.fillStyle = '#ffffff';
+  x.fillRect(cx0, cy0 - 3, 1, 2);
+  x.fillRect(cx0 + 2, cy0 - 2, 1, 1);
+});
+
+// ===== CASTLE TILES =====
+// Cobblestone floor — gray stone slabs with grout lines. tile2 has a moss
+// patch; tile3 has a cracked or scorched flagstone.
+const castleTile = makeSprite(32, 32, (x) => {
+  x.fillStyle = '#5a5a5a'; x.fillRect(0, 0, 32, 32);
+  // Grout / mortar grid.
+  x.fillStyle = '#2a2a2a';
+  x.fillRect(0, 0, 32, 1);
+  x.fillRect(0, 16, 32, 1);
+  x.fillRect(0, 0, 1, 32);
+  x.fillRect(16, 0, 1, 32);
+  // Stone speckle.
+  for (let i = 0; i < 70; i++) {
+    x.fillStyle = ['#6a6a6a','#4a4a4a','#7a7a7a','#3a3a3a'][irand(0,3)];
+    x.fillRect(irand(1,30), irand(1,30), 1, 1);
+  }
+  // Slab highlights — top edges of each quadrant.
+  x.fillStyle = '#7a7a7a';
+  x.fillRect(1, 1, 14, 1);
+  x.fillRect(17, 1, 14, 1);
+  x.fillRect(1, 17, 14, 1);
+  x.fillRect(17, 17, 14, 1);
+});
+const castleTile2 = makeSprite(32, 32, (x) => {
+  x.fillStyle = '#525252'; x.fillRect(0, 0, 32, 32);
+  x.fillStyle = '#2a2a2a';
+  x.fillRect(0, 0, 32, 1);
+  x.fillRect(0, 16, 32, 1);
+  x.fillRect(0, 0, 1, 32);
+  x.fillRect(16, 0, 1, 32);
+  for (let i = 0; i < 80; i++) {
+    x.fillStyle = ['#5a5a5a','#3a3a3a','#6a6a6a'][irand(0,2)];
+    x.fillRect(irand(1,30), irand(1,30), 1, 1);
+  }
+  // Moss patch on one slab.
+  const qx = irand(0, 1) * 16 + 2, qy = irand(0, 1) * 16 + 2;
+  x.fillStyle = '#3a5a2a';
+  for (let i = 0; i < 16; i++) {
+    x.fillRect(qx + irand(0, 11), qy + irand(0, 11), 1, 1);
+  }
+  x.fillStyle = '#4a7a3a';
+  for (let i = 0; i < 6; i++) {
+    x.fillRect(qx + irand(0, 11), qy + irand(0, 11), 1, 1);
+  }
+});
+const castleTile3 = makeSprite(32, 32, (x) => {
+  x.fillStyle = '#4a4a4a'; x.fillRect(0, 0, 32, 32);
+  x.fillStyle = '#1a1a1a';
+  x.fillRect(0, 0, 32, 1);
+  x.fillRect(0, 16, 32, 1);
+  x.fillRect(0, 0, 1, 32);
+  x.fillRect(16, 0, 1, 32);
+  for (let i = 0; i < 60; i++) {
+    x.fillStyle = ['#5a5a5a','#2a2a2a','#6a6a6a'][irand(0,2)];
+    x.fillRect(irand(1,30), irand(1,30), 1, 1);
+  }
+  // Crack diagonal across one slab.
+  x.fillStyle = '#181818';
+  const qx = irand(0, 1) * 16, qy = irand(0, 1) * 16;
+  for (let i = 0; i < 12; i++) {
+    x.fillRect(qx + 2 + i, qy + 2 + (i & 1) + Math.floor(i / 3), 1, 1);
+  }
+  // Small skull / dropped emblem on another slab.
+  if (Math.random() < 0.4) {
+    const sx = (1 - Math.floor(qx / 16)) * 16 + 5;
+    const sy = (1 - Math.floor(qy / 16)) * 16 + 5;
+    x.fillStyle = '#cfc8b0';
+    x.fillRect(sx, sy, 4, 3);
+    x.fillStyle = '#000';
+    x.fillRect(sx + 1, sy + 1, 1, 1);
+    x.fillRect(sx + 2, sy + 1, 1, 1);
+  }
+});
+
+// Map registry — keyed by id, used by the start picker and the tile renderer.
+const MAPS = {
+  forest: { id: 'forest', name: 'FOREST', tiles: [tile, tile2, tile3] },
+  arctic: { id: 'arctic', name: 'ARCTIC', tiles: [arcticTile, arcticTile2, arcticTile3] },
+  castle: { id: 'castle', name: 'CASTLE', tiles: [castleTile, castleTile2, castleTile3] },
+};
 
 // ===== UPGRADE ICONS =====
 function drawIcon(c, kind) {
@@ -997,5 +1220,125 @@ function drawIcon(c, kind) {
       x.fillStyle = '#fff';
       x.fillRect(cx - 1, cy - 1, 2, 2);
       break;
+
+    // ----- FLAMETHROWER -----
+    case 'flame_unlock':
+    case 'flame_dmg':
+    case 'flame_rate':
+    case 'flame_range':
+    case 'flame_width': {
+      // Cone of fire pointing right.
+      const origin = { x: cx - 12, y: cy };
+      const range = 22;
+      const half = 0.55;
+      // Outer flame.
+      x.fillStyle = '#ff6600';
+      x.beginPath();
+      x.moveTo(origin.x, origin.y);
+      x.arc(origin.x, origin.y, range, -half, half);
+      x.closePath();
+      x.fill();
+      // Mid flame.
+      x.fillStyle = '#ffaa1a';
+      x.beginPath();
+      x.moveTo(origin.x, origin.y);
+      x.arc(origin.x, origin.y, range * 0.75, -half * 0.7, half * 0.7);
+      x.closePath();
+      x.fill();
+      // Core.
+      x.fillStyle = '#ffe088';
+      x.beginPath();
+      x.moveTo(origin.x, origin.y);
+      x.arc(origin.x, origin.y, range * 0.45, -half * 0.45, half * 0.45);
+      x.closePath();
+      x.fill();
+      // Nozzle / barrel.
+      x.fillStyle = '#3a3a3a';
+      x.fillRect(origin.x - 6, origin.y - 2, 7, 4);
+      x.fillStyle = '#6a6a6a';
+      x.fillRect(origin.x - 6, origin.y - 2, 7, 1);
+      x.fillStyle = '#ff3300';
+      x.fillRect(origin.x - 1, origin.y - 1, 1, 2);
+      if (kind === 'flame_dmg')   { x.fillStyle = '#ff3344'; x.fillRect(c.width - 8, 4, 4, 1); x.fillRect(c.width - 7, 3, 2, 3); }
+      if (kind === 'flame_rate')  { x.fillStyle = '#66ddff'; x.fillRect(c.width - 6, 4, 2, 1); x.fillRect(c.width - 8, 6, 2, 1); x.fillRect(c.width - 10, 8, 2, 1); }
+      if (kind === 'flame_range') { x.fillStyle = '#fff'; x.fillRect(c.width - 12, 7, 8, 1); x.fillRect(c.width - 6, 5, 2, 5); }
+      if (kind === 'flame_width') { x.fillStyle = '#fff'; x.fillRect(c.width - 10, 4, 5, 1); x.fillRect(c.width - 10, 10, 5, 1); }
+      break;
+    }
+    // ----- BANANA -----
+    case 'banana_unlock':
+    case 'banana_dmg':
+    case 'banana_count':
+    case 'banana_rate':
+    case 'banana_speed': {
+      // Tilted banana with a faint motion arc behind it.
+      x.strokeStyle = 'rgba(255, 224, 136, 0.45)';
+      x.lineWidth = 2;
+      x.beginPath();
+      x.arc(cx, cy + 4, 18, Math.PI * 1.15, Math.PI * 1.85);
+      x.stroke();
+      x.save();
+      x.translate(cx, cy);
+      x.rotate(-Math.PI / 5);
+      x.scale(3, 3);
+      x.drawImage(bananaSprite, -5, -4);
+      x.restore();
+      if (kind === 'banana_dmg')   { x.fillStyle = '#ff3344'; x.fillRect(c.width - 8, 4, 4, 1); x.fillRect(c.width - 7, 3, 2, 3); }
+      if (kind === 'banana_count') { x.fillStyle = '#fff'; x.fillRect(4, c.height - 10, 1, 6); x.fillRect(1, c.height - 7, 7, 1); }
+      if (kind === 'banana_rate')  { x.fillStyle = '#66ddff'; x.fillRect(c.width - 6, 4, 2, 1); x.fillRect(c.width - 8, 6, 2, 1); x.fillRect(c.width - 10, 8, 2, 1); }
+      if (kind === 'banana_speed') { x.fillStyle = '#fff'; x.fillRect(c.width - 12, 7, 8, 1); x.fillRect(c.width - 6, 5, 2, 5); }
+      break;
+    }
+    case 'super_banana': {
+      // Two crossed bananas with a splash burst behind.
+      // Splash starburst.
+      x.fillStyle = 'rgba(255, 138, 26, 0.35)';
+      x.beginPath(); x.arc(cx, cy, 18, 0, TAU); x.fill();
+      x.fillStyle = '#ff8a1a';
+      for (let i = 0; i < 8; i++) {
+        const a = i / 8 * TAU;
+        const r1 = 8, r2 = 16;
+        x.fillRect(cx + Math.cos(a) * r1 - 1, cy + Math.sin(a) * r1 - 1, 2, 2);
+        x.fillRect(cx + Math.cos(a) * r2 - 1, cy + Math.sin(a) * r2 - 1, 2, 2);
+      }
+      // Crossed bananas.
+      for (const rot of [-Math.PI / 4, Math.PI / 4]) {
+        x.save();
+        x.translate(cx, cy);
+        x.rotate(rot);
+        x.scale(2.6, 2.6);
+        x.drawImage(bananaSprite, -5, -4);
+        x.restore();
+      }
+      break;
+    }
+    case 'super_flame': {
+      // Four-way flame cones radiating from center.
+      const range = 18;
+      const half = 0.5;
+      for (let i = 0; i < 4; i++) {
+        const ang = i * Math.PI / 2;
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        // Outer.
+        x.fillStyle = '#ff6600';
+        x.beginPath();
+        x.moveTo(cx, cy);
+        x.arc(cx, cy, range, ang - half, ang + half);
+        x.closePath();
+        x.fill();
+        // Core.
+        x.fillStyle = '#ffe088';
+        x.beginPath();
+        x.moveTo(cx, cy);
+        x.arc(cx, cy, range * 0.5, ang - half * 0.5, ang + half * 0.5);
+        x.closePath();
+        x.fill();
+        ca; sa;
+      }
+      // Central core.
+      x.fillStyle = '#ffffff';
+      x.beginPath(); x.arc(cx, cy, 3, 0, TAU); x.fill();
+      break;
+    }
   }
 }
