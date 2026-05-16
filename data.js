@@ -213,13 +213,12 @@ const SUPERS = [
     },
   },
   { id: 'super_flame', weaponId: 'flame', name: 'INFERNO',
-    desc: 'Sprays fire in all 4 directions, 1.5× damage, wider',
+    desc: 'Sprays fire in all 4 directions, 1.2× damage',
     iconKind: 'super_flame',
     requires: [{ id: 'flame_dmg', level: 2 }, { id: 'flame_range', level: 1 }, { id: 'dmg', level: 1 }],
     apply: (p) => {
       p.weapons.flame.fourWay = true;
-      p.weapons.flame.dmg *= 1.5;
-      p.weapons.flame.halfAngle *= 1.2;
+      p.weapons.flame.dmg *= 1.2;
     },
   },
   { id: 'super_banana', weaponId: 'banana', name: 'POTASSIUM BLAST',
