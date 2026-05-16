@@ -207,6 +207,16 @@ function loop(t) {
 function update(dt) {
   world.time += dt;
 
+  // Survival coin payout — 10 coins each full minute survived (non-wave mode).
+  if (!world.waveMode) {
+    const m = Math.floor(world.time / 60);
+    if (m > (world.coinMinuteTick | 0)) {
+      const gained = m - (world.coinMinuteTick | 0);
+      world.coinMinuteTick = m;
+      awardCoins(gained * COIN_PER_MINUTE, 'minute');
+    }
+  }
+
   // ----- player input + movement + per-slot weapon firing -----
   for (const p of world.players) {
     if (!p || p.dead) continue;
@@ -2456,6 +2466,11 @@ function updateWaveSpawner(dt) {
   // Queue is empty — wait for the field to be clear, then queue up next wave.
   if (world.enemies.length === 0) {
     if (world.wave < TOTAL_WAVES) {
+      // Speedrun coin payout — 10 coins per 2 waves cleared.
+      if (world.wave > 0 && world.wave % 2 === 0 && world.lastWaveCoined !== world.wave) {
+        world.lastWaveCoined = world.wave;
+        awardCoins(COIN_PER_TWO_WAVES, 'wave');
+      }
       world.waveBanner = { t: 1.5, tMax: 1.5, line1: `WAVE ${world.wave} CLEAR`, line2: 'NEXT WAVE INCOMING' };
       world.waveIntermissionT = 1.5;
     }
@@ -2817,6 +2832,10 @@ function startGame() {
   world.waveSpawnTime = null;
   world.waveIntermissionT = 0;
   world.waveBanner = null;
+  // Coin tracking for the run — minute boundaries and per-wave payout.
+  world.coinsEarnedThisRun = 0;
+  world.coinMinuteTick = 0;
+  world.lastWaveCoined = 0;
   moveTarget = null;
   document.getElementById('overlay').style.display = 'none';
   document.getElementById('hud').style.display = 'flex';

@@ -6,7 +6,6 @@
 // ============================================================
 
 let selectedMode = 'solo';
-let selectedSkin = [0, 1]; // [P1, P2] indices into PLAYER_SKINS
 let selectedSpeedrun = false;
 let selectedMap = 'forest';
 
@@ -20,6 +19,88 @@ function getSpeedrunBest() {
 }
 function setSpeedrunBest(seconds) {
   try { localStorage.setItem(SPEEDRUN_BEST_KEY, String(seconds)); } catch {}
+}
+
+// ---------- COINS + CHARACTER UNLOCKS (persisted) ----------
+const COINS_KEY = 'pixelSurvivors_coins';
+const UNLOCKED_KEY = 'pixelSurvivors_chars_unlocked';
+const SELECTED_SKIN_KEY = 'pixelSurvivors_selected_skin';
+
+function getCoins() {
+  try {
+    const v = localStorage.getItem(COINS_KEY);
+    return v == null ? 0 : Math.max(0, Math.floor(Number(v) || 0));
+  } catch { return 0; }
+}
+function setCoins(n) {
+  try { localStorage.setItem(COINS_KEY, String(Math.max(0, Math.floor(n)))); } catch {}
+}
+function addCoins(n) {
+  if (!n) return;
+  setCoins(getCoins() + n);
+}
+function spendCoins(n) {
+  const have = getCoins();
+  if (have < n) return false;
+  setCoins(have - n);
+  return true;
+}
+
+function getUnlockedCharacters() {
+  try {
+    const raw = localStorage.getItem(UNLOCKED_KEY);
+    if (!raw) return DEFAULT_UNLOCKED_CHARACTERS.slice();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return DEFAULT_UNLOCKED_CHARACTERS.slice();
+    // Always guarantee the default is included so the player can't soft-lock.
+    const set = new Set(arr.concat(DEFAULT_UNLOCKED_CHARACTERS));
+    return Array.from(set);
+  } catch { return DEFAULT_UNLOCKED_CHARACTERS.slice(); }
+}
+function isCharacterUnlocked(skinId) {
+  return getUnlockedCharacters().includes(skinId);
+}
+function unlockCharacter(skinId) {
+  const list = getUnlockedCharacters();
+  if (list.includes(skinId)) return;
+  list.push(skinId);
+  try { localStorage.setItem(UNLOCKED_KEY, JSON.stringify(list)); } catch {}
+}
+
+// Saved skin selection per slot — only ever holds unlocked skins.
+function loadSelectedSkin() {
+  try {
+    const raw = localStorage.getItem(SELECTED_SKIN_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length >= 1) {
+        return [
+          clamp(Number(parsed[0]) || 0, 0, PLAYER_SKINS.length - 1),
+          clamp(Number(parsed[1]) || 0, 0, PLAYER_SKINS.length - 1),
+        ];
+      }
+    }
+  } catch {}
+  // Default to the first unlocked skin (cleric).
+  const defaultIdx = PLAYER_SKINS.findIndex(s => isCharacterUnlocked(s.id));
+  const idx = defaultIdx >= 0 ? defaultIdx : 0;
+  return [idx, idx];
+}
+function saveSelectedSkin() {
+  try { localStorage.setItem(SELECTED_SKIN_KEY, JSON.stringify(selectedSkin)); } catch {}
+}
+
+let selectedSkin = loadSelectedSkin();
+
+// Award + persist coins earned during a run. Called from the game loop and from
+// victory. `kind` is purely for future telemetry — no behavioral effect.
+function awardCoins(amount, _kind) {
+  if (amount > 0) {
+    addCoins(amount);
+    if (typeof world !== 'undefined' && world) {
+      world.coinsEarnedThisRun = (world.coinsEarnedThisRun || 0) + amount;
+    }
+  }
 }
 
 function formatTime(t) {
@@ -141,7 +222,8 @@ function renderLevelUpPanel(p, options) {
         continue;
       }
       const w = WEAPONS[id];
-      const canRemove = !(id === 'knife' && p.slots.length === 1);
+      const isStarter = id === p.startingWeapon;
+      const canRemove = !isStarter && !(id === 'knife' && p.slots.length === 1);
 
       const sup = SUPERS.find(s => s.weaponId === id);
       let supHtml = '';
@@ -179,6 +261,7 @@ function renderLevelUpPanel(p, options) {
 
       cells.push(`<div class="slot filled" data-slot-id="${id}">
         ${canRemove ? `<button class="slot-remove" data-remove="${id}" title="Remove ${w.name}">×</button>` : ''}
+        ${isStarter ? `<div class="slot-starter" title="Starter weapon — locked">STARTER</div>` : ''}
         <canvas width="36" height="36" data-slot-icon="${w.iconId}"></canvas>
         <div class="slot-name">${w.name}</div>
         <div class="slot-sup-label">${sup ? 'EVOLUTION REQUIREMENTS' : ''}</div>
@@ -379,8 +462,12 @@ function buildRunSummaryHtml() {
       ${dmgRows}
     </div>`;
   }).join('');
+  const earned = (world.coinsEarnedThisRun | 0);
+  const coinLine = earned > 0
+    ? ` &nbsp; • &nbsp; COINS EARNED <b style="color:#ffee88">+${earned}</b>`
+    : '';
   return `
-    <div class="rs-meta">TIME <b style="color:#ffcc44">${formatTime(world.time)}</b> &nbsp; • &nbsp; TOTAL KILLS <b style="color:#ffcc44">${world.kills}</b></div>
+    <div class="rs-meta">TIME <b style="color:#ffcc44">${formatTime(world.time)}</b> &nbsp; • &nbsp; TOTAL KILLS <b style="color:#ffcc44">${world.kills}</b>${coinLine}</div>
     <div class="rs-grid-players ${isCoop ? 'coop' : ''}">${playerCards}</div>
   `;
 }
@@ -402,6 +489,8 @@ function showVictory() {
       });
     }
   }
+  // Win bonus — credited once per victory.
+  awardCoins(COIN_PER_WIN, 'win');
   // Speedrun: record/update personal best on Titan defeat.
   let speedrunHtml = '';
   if (world.waveMode) {
@@ -551,33 +640,80 @@ function wireMapButtons() {
   });
 }
 
+function ensureSelectedSkinUnlocked() {
+  // Snap any locked selection back to the first unlocked one so SOLO never
+  // tries to spawn a player with a character the user hasn't bought. Co-op
+  // skips this — both players can pick any character for free.
+  if (selectedMode === 'coop') return;
+  const firstUnlocked = PLAYER_SKINS.findIndex(s => isCharacterUnlocked(s.id));
+  const fallback = firstUnlocked >= 0 ? firstUnlocked : 0;
+  for (let i = 0; i < 2; i++) {
+    const s = PLAYER_SKINS[selectedSkin[i]];
+    if (!s || !isCharacterUnlocked(s.id)) selectedSkin[i] = fallback;
+  }
+}
+
 function renderSkinPicker() {
+  ensureSelectedSkinUnlocked();
   const wrap = document.getElementById('skinPicker');
   if (!wrap) return;
   const isCoop = selectedMode === 'coop';
+  // Co-op unlocks every character for both players — no shop, no cost.
+  const shopActive = !isCoop;
   const slots = isCoop
     ? [{ idx: 0, name: 'P1', team: 'blue', theme: '#6abfff' },
        { idx: 1, name: 'P2', team: 'red',  theme: '#ff6666' }]
     : [{ idx: 0, name: 'P1', team: 'blue', theme: '#6abfff' }];
-  wrap.innerHTML = slots.map(slot => `
+
+  const coins = getCoins();
+  const coinBar = shopActive ? `
+    <div class="shop-coinbar">
+      <span class="coin-icon">●</span>
+      <span class="coin-amount">${coins.toLocaleString()}</span>
+      <span class="coin-label">COINS</span>
+    </div>` : `
+    <div class="shop-coinbar" style="border-color:rgba(102,221,255,0.5);">
+      <span class="coin-amount" style="color:#aaeeff;">CO-OP</span>
+      <span class="coin-label">ALL CHARACTERS UNLOCKED</span>
+    </div>`;
+
+  const rows = slots.map(slot => `
     <div class="skin-row" data-player="${slot.idx}" style="--team:${slot.theme}">
       <div class="skin-row-label">
         <span class="skin-row-tag">${slot.name}</span>
         <span class="skin-row-team">${slot.team.toUpperCase()} TEAM</span>
       </div>
       <div class="skin-options">
-        ${PLAYER_SKINS.map((s, i) => `
-          <button class="skin-btn ${selectedSkin[slot.idx] === i ? 'selected' : ''}"
-                  data-player="${slot.idx}" data-skin="${i}">
-            <div class="skin-preview">
-              <canvas width="48" height="56" data-skin-canvas="${i}" data-skin-team="${slot.team}"></canvas>
-            </div>
-            <div class="skin-name">${s.name}</div>
-          </button>
-        `).join('')}
+        ${PLAYER_SKINS.map((s, i) => {
+          const startId = CHARACTER_START_WEAPON[s.id] || 'knife';
+          const startWep = WEAPONS[startId];
+          const startName = startWep ? startWep.name : startId.toUpperCase();
+          const unlocked = !shopActive || isCharacterUnlocked(s.id);
+          const selected = selectedSkin[slot.idx] === i;
+          const cls = ['skin-btn', selected && unlocked ? 'selected' : '', !unlocked ? 'locked' : ''].filter(Boolean).join(' ');
+          const canAfford = coins >= CHARACTER_UNLOCK_COST;
+          const lockOverlay = unlocked ? '' : `
+            <div class="skin-lock-overlay">
+              <div class="skin-lock-icon">🔒</div>
+              <div class="skin-lock-cost">${CHARACTER_UNLOCK_COST}<span>●</span></div>
+              ${canAfford
+                ? `<button class="skin-unlock-btn" data-unlock="${s.id}">BUY</button>`
+                : ''}
+            </div>`;
+          return `
+            <div class="${cls}" role="button" tabindex="0" data-player="${slot.idx}" data-skin="${i}" data-skin-id="${s.id}">
+              <div class="skin-preview">
+                <canvas width="48" height="56" data-skin-canvas="${i}" data-skin-team="${slot.team}"></canvas>
+                ${lockOverlay}
+              </div>
+              <div class="skin-name">${s.name}</div>
+              <div class="skin-weapon" title="Starts with ${startName} (locked into loadout)">⚔ ${startName}</div>
+            </div>`;
+        }).join('')}
       </div>
-    </div>
-  `).join('');
+    </div>`).join('');
+
+  wrap.innerHTML = coinBar + rows;
   wrap.querySelectorAll('canvas[data-skin-canvas]').forEach(c => {
     const idx = +c.dataset.skinCanvas;
     const team = c.dataset.skinTeam;
@@ -585,16 +721,33 @@ function renderSkinPicker() {
     const ic = c.getContext('2d');
     ic.imageSmoothingEnabled = false;
     ic.clearRect(0, 0, c.width, c.height);
-    // Center the 14×16 sprite at 2.5× scale (35×40) inside the 48×56 canvas.
     const dw = 14 * 2.5, dh = 16 * 2.5;
     ic.drawImage(sprite, (c.width - dw) / 2, (c.height - dh) / 2 + 2, dw, dh);
   });
+  wrap.querySelectorAll('.skin-unlock-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (btn.disabled) { SFX.click(); return; }
+      const skinId = btn.dataset.unlock;
+      if (!skinId || isCharacterUnlocked(skinId)) return;
+      if (!spendCoins(CHARACTER_UNLOCK_COST)) return;
+      unlockCharacter(skinId);
+      SFX.superUnlock ? SFX.superUnlock() : SFX.click();
+      renderSkinPicker();
+    });
+  });
   wrap.querySelectorAll('.skin-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
+      // Ignore taps that came from the inline unlock button so they don't also
+      // try to select a locked skin.
+      if (e.target.closest('.skin-unlock-btn')) return;
       e.stopPropagation();
       const pl = +btn.dataset.player;
       const sk = +btn.dataset.skin;
+      const skinId = btn.dataset.skinId;
+      if (shopActive && !isCharacterUnlocked(skinId)) { SFX.click(); return; }
       selectedSkin[pl] = sk;
+      saveSelectedSkin();
       SFX.click();
       renderSkinPicker();
     });

@@ -42,6 +42,7 @@ function removeWeapon(p, id) {
   if (!p) return;
   const idx = p.slots.indexOf(id);
   if (idx < 0) return;
+  if (p.startingWeapon && id === p.startingWeapon) return; // locked starter
   if (id === 'knife' && p.slots.length === 1) return; // never empty
   p.slots.splice(idx, 1);
   delete p.weapons[id];
@@ -76,7 +77,8 @@ function createPlayer(opts = {}) {
     lifestealAcc: 0,
     slowedUntil: 0,
     weapons: {},
-    slots: ['knife'],
+    slots: [],
+    startingWeapon: null,
     upgradeLevels: {},
     superUnlocked: {},
     levelUpQueue: 0,
@@ -91,7 +93,10 @@ function createPlayer(opts = {}) {
       damageByWeapon: {},
     },
   };
-  initWeapon(p, 'knife');
+  const start = (CHARACTER_START_WEAPON && CHARACTER_START_WEAPON[p.skinId]) || 'knife';
+  p.startingWeapon = start;
+  p.slots.push(start);
+  initWeapon(p, start);
   return p;
 }
 

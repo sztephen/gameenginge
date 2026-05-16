@@ -287,6 +287,23 @@ const BOSS_TYPES = [
   },
 ];
 
+// Each character starts with one locked weapon — picked to match their fantasy.
+// The starting weapon cannot be removed from the loadout during a run.
+const CHARACTER_START_WEAPON = {
+  cleric: 'knife',
+  knight: 'holy',
+  ninja:  'shards',
+  bandit: 'banana',
+  mage:   'lightning',
+};
+
+// Shop economy: 4 of the 5 characters are locked until bought with coins.
+const CHARACTER_UNLOCK_COST = 500;
+const DEFAULT_UNLOCKED_CHARACTERS = ['cleric'];
+const COIN_PER_WIN = 100;
+const COIN_PER_MINUTE = 10;
+const COIN_PER_TWO_WAVES = 10;
+
 // The 15-minute final boss — game ends only when he dies.
 const TITAN_TYPE = {
   id: 'titan', name: 'THE TITAN',

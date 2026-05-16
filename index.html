@@ -361,6 +361,14 @@
   .sup-req-name { font-weight: bold; }
   .sup-req-lvl  { font-weight: bold; }
 
+  .slot-starter {
+    position: absolute; top: -8px; left: -8px;
+    background: #ffcc44; color: #2a1c08;
+    border: 2px solid #ffee88;
+    padding: 1px 6px;
+    font-size: 8px; letter-spacing: 1.5px; font-weight: bold;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  }
   .slot-remove {
     position: absolute; top: -8px; right: -8px;
     width: 20px; height: 20px;
@@ -623,6 +631,84 @@
 
   /* Skin picker */
   #skinPicker { display: flex; flex-direction: column; gap: 8px; }
+
+  .shop-coinbar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 10px; margin-bottom: 4px;
+    background: linear-gradient(180deg, rgba(60, 44, 12, 0.6), rgba(20, 12, 4, 0.6));
+    border: 1px solid rgba(255, 204, 68, 0.5);
+    align-self: flex-start;
+  }
+  .shop-coinbar .coin-icon {
+    color: #ffcc44; font-size: 14px; line-height: 1;
+    text-shadow: 0 0 8px rgba(255, 204, 68, 0.7);
+  }
+  .shop-coinbar .coin-amount {
+    color: #ffee88; font-weight: bold; font-size: 13px;
+    letter-spacing: 2px;
+  }
+  .shop-coinbar .coin-label {
+    color: #aaa; font-size: 9px; letter-spacing: 2px;
+  }
+
+  .skin-btn { position: relative; }
+  .skin-weapon {
+    font-size: 8px; color: #66ddff; letter-spacing: 1px;
+    margin-top: 2px; white-space: nowrap;
+    opacity: 0.85;
+  }
+  .skin-btn.selected .skin-weapon { color: var(--team); opacity: 1; }
+  .skin-btn.locked { cursor: pointer; opacity: 0.85; }
+  .skin-btn.locked .skin-name { color: #777; }
+  .skin-btn.locked .skin-weapon { color: #555; }
+  .skin-btn.locked:hover .skin-name { color: #aaa; }
+  .skin-btn.locked .skin-preview canvas { filter: grayscale(0.85) brightness(0.55); }
+
+  .skin-lock-overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 2px;
+    background: rgba(8, 4, 14, 0.78);
+    pointer-events: none;
+  }
+  .skin-lock-icon { font-size: 14px; opacity: 0.85; }
+  .skin-lock-cost {
+    font-size: 11px; color: #ffcc44; letter-spacing: 1px;
+    font-weight: bold;
+  }
+  .skin-lock-cost span {
+    color: #ffcc44; margin-left: 2px; font-size: 9px;
+    text-shadow: 0 0 6px rgba(255, 204, 68, 0.7);
+  }
+  .skin-unlock-btn {
+    pointer-events: auto;
+    margin-top: 3px !important;
+    padding: 3px 6px !important;
+    font-size: 8px !important;
+    letter-spacing: 1.5px !important;
+    background: linear-gradient(180deg, #ffcc44 0%, #aa6600 100%);
+    color: #2a1c08;
+    border: 1px solid #ffee88 !important;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: bold;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.6) !important;
+    transform: none !important;
+    min-width: 0;
+  }
+  .skin-unlock-btn:hover:not(.disabled) {
+    background: linear-gradient(180deg, #ffee88 0%, #cc8800 100%) !important;
+    transform: translateY(-1px) !important;
+  }
+  .skin-unlock-btn.disabled {
+    background: linear-gradient(180deg, #555 0%, #2a2a2a 100%) !important;
+    color: #aaa;
+    border-color: #444 !important;
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
   .skin-row {
     display: flex; align-items: center; gap: 10px;
   }
@@ -640,11 +726,15 @@
     font-size: 7px; letter-spacing: 2px; color: #888;
   }
   .skin-options {
-    flex: 1;
-    display: flex; gap: 6px; justify-content: flex-start; flex-wrap: nowrap;
+    flex: 1; min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+    gap: 6px;
+    justify-items: stretch;
   }
   .skin-btn {
-    flex: 1; min-width: 0;
+    width: 100%;
+    max-width: 130px;
     padding: 4px 3px 5px;
     background: linear-gradient(180deg, #1a0a28 0%, #0e0418 100%);
     border: 2px solid rgba(102, 221, 255, 0.2);
@@ -850,5 +940,11 @@
 <script src="weapons.js"></script>
 <script src="ui.js"></script>
 <script src="game.js"></script>
+
+<!-- Vercel Web Analytics — tracks visitors & page views once deployed to Vercel. -->
+<script>
+  window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+</script>
+<script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>
